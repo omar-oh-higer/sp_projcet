@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Order;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -13,8 +14,23 @@ class SendInvoiceJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public $tries = 3;
+
+    public $backoff = [10, 60, 300];
+
+    public function __construct(
+        public int $orderId,
+    ) {}
+
     public function handle()
     {
-        Log::info("Invoice sent successfully from the queue!");
+        $order = Order::query()->find($this->orderId);
+
+        if (!$order) {
+            Log::warning("Order {$this->orderId} not found for invoice");
+            return;
+        }
+
+        Log::info("Invoice sent for order {$this->orderId}: Product #{$order->product_id}, Qty {$order->quantity}");
     }
 }

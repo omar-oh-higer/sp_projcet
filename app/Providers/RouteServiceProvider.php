@@ -14,5 +14,9 @@ class RouteServiceProvider extends ServiceProvider // Added class declaration
         RateLimiter::for('orders', function ($request) {
             return Limit::perMinute(20)->by($request->ip());
         });
+
+        // RateLimiter::for('purchases', function ($request) {
+        //     return Limit::perMinute(300)->by($request->ip());
+        // });
     }
 }
