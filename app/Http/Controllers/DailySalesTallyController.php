@@ -8,6 +8,7 @@ use App\Models\DailySalesSummary;
 use App\Models\Order;
 use Illuminate\Http\JsonResponse;
 
+/** Task 4 API: inline daily tally vs queued batched tally + read stored summary. */
 class DailySalesTallyController extends Controller
 {
     /**
@@ -15,8 +16,8 @@ class DailySalesTallyController extends Controller
      *
      * Uses a cursor() loop on the orders query so each row is handled
      * in turn instead of get(), which builds one huge Collection and exhausts PHP memory on
-     * hundreds of thousands of orders. The trade-off you still demonstrate: the client waits
-     * until every row for the day is scanned here; the queued path returns immediately.
+     * hundreds of thousands of orders. The HTTP response waits until the scan finishes.
+     * The queued tally endpoint returns immediately and uses a worker instead.
      */
     public function tallyWait(TallyDailySalesRequest $request): JsonResponse
     {
@@ -60,33 +61,24 @@ class DailySalesTallyController extends Controller
     }
 
     /**
-     * After improvement: push ProcessDailySalesTallyJob to the queue. Run `php artisan queue:work`
-     * to process it; totals appear in GET /api/daily-sales-summary after the job finishes.
+     * Task 4 “after”: enqueue ProcessDailySalesTallyJob (batched chunkById inside the job).
+     * Run `php artisan queue:work` with QUEUE_CONNECTION=database to see it process; then GET
+     * daily-sales-summary for counts. Response returns immediately with no totals.
      */
     public function tallyQueued(TallyDailySalesRequest $request): JsonResponse
     {
         $saleDate = $request->validated('sale_date');
 
-        // ProcessDailySalesTallyJob::dispatch($saleDate);
-        ProcessDailySalesTallyJob::dispatchSync($saleDate);
-        
-        $row = DailySalesSummary::query()->whereDate('sale_date', $saleDate)->firstOrFail();
+        ProcessDailySalesTallyJob::dispatch($saleDate);
 
         return response()->json([
-            'message' => 'Tally completed using batched job processing.',
+            'message' => 'Tally job queued. Run `php artisan queue:work`, then GET /api/daily-sales-summary for results.',
             'processing_mode' => 'queued_batched',
             'sale_date' => $saleDate,
-            'successful_order_count' => (int) $row->successful_order_count,
-            'total_quantity' => (int) $row->total_quantity,
-            'computed_at' => $row->computed_at?->toIso8601String(),
-            ]);
-        // return response()->json([
-        //     'message' => 'Tally job queued. Run `php artisan queue:work`, then GET /api/daily-sales-summary for results.',
-        //     'processing_mode' => 'queued_batched',
-        //     'sale_date' => $saleDate,
-        // ]);
+        ]);
     }
 
+    /** Return the stored DailySalesSummary row for the given sale_date (query string). */
     public function showSummary(TallyDailySalesRequest $request): JsonResponse
     {
         $saleDate = $request->validated('sale_date');

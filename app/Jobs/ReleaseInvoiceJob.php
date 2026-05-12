@@ -10,6 +10,11 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 
+/**
+ * Task 2: limits how many invoice jobs run at once (cache-based semaphore), then runs
+ * SendInvoiceJob for the same order. Dispatched after a successful locked purchase so invoice
+ * work stays off the hot path and respects resource caps.
+ */
 class ReleaseInvoiceJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -22,10 +27,14 @@ class ReleaseInvoiceJob implements ShouldQueue
 
     public $semaphoreKey = 'invoice-processing-semaphore';
 
+    /** @param int $orderId Order that just succeeded and needs invoice processing */
     public function __construct(
         public int $orderId,
     ) {}
 
+    /**
+     * Acquire semaphore slot (or re-queue), run SendInvoiceJob logic for this order, then release slot.
+     */
     public function handle()
     {
         $semaphoreKey = $this->semaphoreKey;

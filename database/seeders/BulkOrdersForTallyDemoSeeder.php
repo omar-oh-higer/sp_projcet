@@ -18,6 +18,7 @@ class BulkOrdersForTallyDemoSeeder extends Seeder
 {
     public const DEFAULT_ORDER_COUNT = 25_000;
 
+    /** Bulk-insert demo orders for the current day (see class docblock). */
     public function run(): void
     {
         $productIds = Product::query()->pluck('id')->all();

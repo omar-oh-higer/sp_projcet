@@ -16,6 +16,10 @@ class EnsureCircuitBreakerClosed
         private CircuitBreakerManager $circuitBreaker,
     ) {}
 
+    /**
+     * If the circuit is OPEN, return 503 without hitting the controller action.
+     * Otherwise pass the request through (CLOSED or HALF_OPEN).
+     */
     public function handle(Request $request, Closure $next): Response
     {
         if ($this->circuitBreaker->isOpen()) {

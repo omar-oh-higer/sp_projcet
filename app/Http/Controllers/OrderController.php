@@ -10,8 +10,13 @@ use App\Services\CircuitBreakerManager;
 use App\Services\StockPurchaseService;
 use Illuminate\Http\JsonResponse;
 
+/** Task 1–3 purchase demos (with/without lock, invoice inline vs queued). */
 class OrderController extends Controller
 {
+    /**
+     * Task 1 “unsafe” path: read stock, decrement, save — no row lock (race conditions under concurrency).
+     * Optional header X-DEMO-DELAY-MS simulates slow reads (capped).
+     */
     public function buyWithoutLock(PurchaseRequest $request)
     {
         $payload = $request->validated();
@@ -48,6 +53,10 @@ class OrderController extends Controller
         ]);
     }
 
+    /**
+     * Task 1 safe purchase + Task 3 “after”: transaction + lockForUpdate in StockPurchaseService,
+     * then queue invoice via ReleaseInvoiceJob (invoice_mode queued in JSON).
+     */
     public function buyWithLock(PurchaseRequest $request, StockPurchaseService $stockPurchaseService, CircuitBreakerManager $circuitBreaker)
     {
         $outcome = $this->lockedPurchaseOutcome($request, $stockPurchaseService);
@@ -69,8 +78,8 @@ class OrderController extends Controller
     }
 
     /**
-     * Same locked purchase as buyWithLock, but runs invoice work on the HTTP thread (user waits).
-     * Does not dispatch ReleaseInvoiceJob; use for Task 3 before/after demos.
+     * Task 3 “before”: same locked purchase as buyWithLock, but runs invoice work on this request
+     * (handle() only — not dispatch). Optional X-INVOICE-DELAY-MS simulates slow invoice (capped).
      */
     public function buyWithLockWaitForInvoice(PurchaseRequest $request, StockPurchaseService $stockPurchaseService, CircuitBreakerManager $circuitBreaker)
     {
@@ -98,6 +107,9 @@ class OrderController extends Controller
     }
 
     /**
+     * Shared purchase attempt for locked routes: validates via PurchaseRequest, runs service, returns
+     * either an error JsonResponse or success payload [order_id, stock].
+     *
      * @return JsonResponse|array{order_id: int, stock: int}
      */
     private function lockedPurchaseOutcome(
@@ -139,6 +151,7 @@ class OrderController extends Controller
         ];
     }
 
+    /** Manual check that the queue accepts SendInvoiceJob (dev/demo only). */
     public function testQueue()
     {
         SendInvoiceJob::dispatch(1);

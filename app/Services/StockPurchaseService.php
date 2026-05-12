@@ -6,10 +6,13 @@ use App\Models\Order;
 use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 
+/** Task 1: concurrent-safe purchase using a DB transaction and row-level lock. */
 class StockPurchaseService
 {
     /**
-     * @return array{status: string, stock: int|null, order_id: int|null}
+     * Safe stock decrement: one DB transaction, row lock (lockForUpdate), then decrement or record failed order.
+     *
+     * @return array{status: string, stock: int|null, order_id: int|null} status is success|product_not_found|insufficient_stock
      */
     public function purchase(int $productId, int $quantity, ?int $userId = null): array
     {

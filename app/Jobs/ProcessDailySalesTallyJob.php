@@ -10,12 +10,20 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
+/**
+ * Task 4 “after”: tally successful orders for one calendar day using chunkById so memory stays
+ * bounded; writes one row to daily_sales_summaries.
+ */
 class ProcessDailySalesTallyJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $chunkSize;
 
+    /**
+     * @param  string  $saleDate  Day to tally (`Y-m-d`), matched with `whereDate(created_at, …)`
+     * @param  int|null  $chunkSize  Rows per `chunkById` batch (default 500)
+     */
     public function __construct(
         public string $saleDate,
         ?int $chunkSize = null,
@@ -23,6 +31,7 @@ class ProcessDailySalesTallyJob implements ShouldQueue
         $this->chunkSize = $chunkSize ?? 500;
     }
 
+    /** Sum quantities and order count for the day, then upsert the `daily_sales_summaries` row. */
     public function handle(): void
     {
         $totalQuantity = 0;

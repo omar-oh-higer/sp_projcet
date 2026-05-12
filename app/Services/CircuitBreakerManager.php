@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
+/** Task 2: simple cache-backed circuit breaker for the invoice / purchase path. */
 class CircuitBreakerManager
 {
     public const STATE_CLOSED = 'closed';
@@ -16,6 +17,7 @@ class CircuitBreakerManager
     private $failureThreshold = 0.3;
     private $openDurationSeconds = 300;
 
+    /** Call after a successful downstream operation while HALF_OPEN to close the breaker. */
     public function recordSuccess(): void
     {
         $state = Cache::get("{$this->cacheKey}:state", self::STATE_CLOSED);
@@ -27,6 +29,7 @@ class CircuitBreakerManager
         }
     }
 
+    /** Record a failure timestamp; may OPEN the circuit if failure rate exceeds threshold. */
     public function recordFailure(): void
     {
         $failures = Cache::get("{$this->cacheKey}:failures", []);
@@ -49,6 +52,7 @@ class CircuitBreakerManager
         }
     }
 
+    /** True if callers should reject traffic (OPEN and still inside open window). */
     public function isOpen(): bool
     {
         $state = Cache::get("{$this->cacheKey}:state", self::STATE_CLOSED);
@@ -69,6 +73,7 @@ class CircuitBreakerManager
         return false;
     }
 
+    /** Current breaker state string from cache (closed|open|half_open). */
     public function getState(): string
     {
         return Cache::get("{$this->cacheKey}:state", self::STATE_CLOSED);
