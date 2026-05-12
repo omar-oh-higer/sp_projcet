@@ -41,5 +41,8 @@ class DatabaseSeeder extends Seeder
                 'updated_at' => now(),
             ],
         ]);
+
+        // Optional large dataset for Task 4 batch tally demos (set BULK_ORDER_SEED_COUNT or use default).
+        // $this->call(BulkOrdersForTallyDemoSeeder::class);
     }
 }

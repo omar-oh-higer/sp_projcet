@@ -20,6 +20,7 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Circuit breaker **success** signal | `OrderController` after successful purchase | **After advice** (must run only on success, so it stays next to the happy path until you promote it to an event listener) |
 | Purchase + stock integrity | `StockPurchaseService` | **Core** business logic |
 | Invoice queued vs inline | `OrderController` methods + jobs | **Core** for this demo; could later move to a strategy or domain event |
+| Daily sales tally (batch vs inline) | `DailySalesTallyController`, `ProcessDailySalesTallyJob` | Task 4: batch processing demo |
 
 ## Routes
 
