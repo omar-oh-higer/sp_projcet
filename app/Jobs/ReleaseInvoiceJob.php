@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Middleware\MeasureJobPerformance;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -31,6 +32,12 @@ class ReleaseInvoiceJob implements ShouldQueue
     public function __construct(
         public int $orderId,
     ) {}
+
+    /** @return array<int, class-string> */
+    public function middleware(): array
+    {
+        return [MeasureJobPerformance::class];
+    }
 
     /**
      * Acquire semaphore slot (or re-queue), run SendInvoiceJob logic for this order, then release slot.

@@ -3,6 +3,7 @@
 use App\Http\Controllers\DailySalesTallyController;
 use App\Http\Controllers\LoadDistributionController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\PerformanceMonitoringController;
 use Illuminate\Support\Facades\Route;
 
 // Route::middleware('throttle:purchases')->group(function () {
@@ -22,6 +23,9 @@ use Illuminate\Support\Facades\Route;
     Route::get('/load/distribution-stats', [LoadDistributionController::class, 'stats']);
     Route::post('/load/set-server-health', [LoadDistributionController::class, 'setServerHealth']);
     Route::post('/load/distribution-reset', [LoadDistributionController::class, 'reset']);
+
+    Route::get('/performance/stats', [PerformanceMonitoringController::class, 'stats']);
+    Route::post('/performance/reset', [PerformanceMonitoringController::class, 'reset']);
 // });
 
 Route::get('/test-queue', [OrderController::class, 'testQueue']);

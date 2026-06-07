@@ -14,6 +14,11 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'circuit.breaker' => \App\Http\Middleware\EnsureCircuitBreakerClosed::class,
+            'performance.monitor' => \App\Http\Middleware\MeasureRequestPerformance::class,
+        ]);
+
+        $middleware->api(append: [
+            \App\Http\Middleware\MeasureRequestPerformance::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

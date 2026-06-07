@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Middleware\MeasureJobPerformance;
 use App\Models\DailySalesSummary;
 use App\Models\Order;
 use Illuminate\Bus\Queueable;
@@ -29,6 +30,12 @@ class ProcessDailySalesTallyJob implements ShouldQueue
         ?int $chunkSize = null,
     ) {
         $this->chunkSize = $chunkSize ?? 500;
+    }
+
+    /** @return array<int, class-string> */
+    public function middleware(): array
+    {
+        return [MeasureJobPerformance::class];
     }
 
     /** Sum quantities and order count for the day, then upsert the `daily_sales_summaries` row. */
