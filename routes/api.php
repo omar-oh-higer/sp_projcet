@@ -4,6 +4,7 @@ use App\Http\Controllers\DailySalesTallyController;
 use App\Http\Controllers\LoadDistributionController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PerformanceMonitoringController;
+use App\Http\Controllers\ProductCatalogController;
 use Illuminate\Support\Facades\Route;
 
 // Route::middleware('throttle:purchases')->group(function () {
@@ -26,6 +27,12 @@ use Illuminate\Support\Facades\Route;
 
     Route::get('/performance/stats', [PerformanceMonitoringController::class, 'stats']);
     Route::post('/performance/reset', [PerformanceMonitoringController::class, 'reset']);
+
+    Route::get('/products/{product}/direct', [ProductCatalogController::class, 'showDirect']);
+    Route::get('/products/{product}/cached', [ProductCatalogController::class, 'showCached']);
+    Route::get('/cache/stats', [ProductCatalogController::class, 'cacheStats']);
+    Route::post('/cache/reset', [ProductCatalogController::class, 'cacheReset']);
+    Route::post('/cache/warm-popular', [ProductCatalogController::class, 'warmPopular']);
 // });
 
 Route::get('/test-queue', [OrderController::class, 'testQueue']);

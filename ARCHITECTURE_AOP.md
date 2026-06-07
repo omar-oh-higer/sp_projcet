@@ -25,6 +25,8 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Invoice queued vs inline | `OrderController` methods + jobs | **Core** for this demo; could later move to a strategy or domain event |
 | Daily sales tally (batch vs inline) | `DailySalesTallyController`, `ProcessDailySalesTallyJob` | Task 4: batch processing demo |
 | Load distribution (single vs Round Robin) | `LoadDistributionController`, `RoundRobinLoadBalancer`, `BackendHealthRegistry` | Task 5: horizontal scaling simulation |
+| Product catalog cache (Cache-Aside) | `CachedProductLookup`, `DirectProductLookup`, `ProductCacheInvalidator` | Task 6: Redis distributed cache |
+| Cache invalidation after purchase | `StockPurchaseService` → `ProductCacheInvalidator::forget()` | **After-advice style** side effect when stock changes |
 
 ## Routes
 
@@ -32,6 +34,9 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 - `POST /api/buy-with-lock` and `POST /api/buy-with-lock-wait-invoice` — wrapped in `circuit.breaker` middleware alias (see `bootstrap/app.php`).
 - `GET /api/performance/stats` — aggregated timings recorded by the performance aspect.
 - `POST /api/performance/reset` — clear demo measurements.
+- `GET /api/products/{id}/direct` — Task 6 before (always DB).
+- `GET /api/products/{id}/cached` — Task 6 after (Cache-Aside via Redis store).
+- `GET /api/cache/stats` — product cache hit/miss metrics.
 
 ## Performance monitoring flow (around advice)
 

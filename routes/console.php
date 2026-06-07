@@ -358,3 +358,27 @@ Artisan::command('load:distribute {--requests=30}', function () {
     $this->line('');
     $this->info('Run GET /api/load/distribution-stats for the same totals from the database.');
 })->purpose('Simulate Round Robin request distribution across virtual backends');
+
+// Task 6: warm popular products into Redis (Cache-Aside)
+Artisan::command('products:cache-warm', function () {
+    $lookup = app(\App\Services\ProductCatalog\CachedProductLookup::class);
+
+    $this->info('Task 6: warming popular products into Redis (Cache-Aside)...');
+    $this->line('Store: '.config('product_cache.store', 'redis'));
+    $this->line('Popular IDs: '.implode(', ', config('product_cache.popular_product_ids', [])));
+    $this->line('');
+
+    $warmed = $lookup->warmPopular();
+
+    $this->table(
+        ['Product ID', 'Warmed', 'Cache result'],
+        collect($warmed)->map(fn (array $row) => [
+            $row['product_id'],
+            $row['warmed'] ? 'yes' : 'no',
+            $row['cache_result'],
+        ])->all()
+    );
+
+    $this->line('');
+    $this->info('Run GET /api/cache/stats or call /cached twice to see hit rate.');
+})->purpose('Warm popular product catalog entries into Redis cache');
