@@ -21,6 +21,7 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Purchase + stock integrity | `StockPurchaseService` | **Core** business logic |
 | Invoice queued vs inline | `OrderController` methods + jobs | **Core** for this demo; could later move to a strategy or domain event |
 | Daily sales tally (batch vs inline) | `DailySalesTallyController`, `ProcessDailySalesTallyJob` | Task 4: batch processing demo |
+| Load distribution (single vs Round Robin) | `LoadDistributionController`, `RoundRobinLoadBalancer`, `BackendHealthRegistry` | Task 5: horizontal scaling simulation |
 
 ## Routes
 

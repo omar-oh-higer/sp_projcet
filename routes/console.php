@@ -311,3 +311,50 @@ Artisan::command('load:simulate {productId} {--requests=150} {--quantity=1} {--b
         $this->warn('Connection errors: '.$connectionErrors.' (make sure php artisan serve is running)');
     }
 })->purpose('Comprehensive load test for rate limiting, semaphores, and circuit breaker');
+
+// Task 5: Round Robin distribution simulation (in-process, no HTTP)
+Artisan::command('load:distribute {--requests=30}', function () {
+    $requests = max((int) $this->option('requests'), 1);
+
+    $healthRegistry = app(\App\Services\LoadBalancing\BackendHealthRegistry::class);
+    $balancer = app(\App\Services\LoadBalancing\RoundRobinLoadBalancer::class);
+    $recorder = app(\App\Services\LoadBalancing\LoadDistributionRecorder::class);
+
+    $balancer->resetRotation();
+
+    $counts = [];
+    foreach ($healthRegistry->allBackendIds() as $id) {
+        $counts[$id] = 0;
+    }
+
+    $this->info('Task 5: Round Robin load distribution simulation');
+    $this->line('Requests: '.$requests);
+    $this->line('Healthy backends: '.implode(', ', $healthRegistry->healthyBackendIds()));
+    $this->line('');
+
+    for ($i = 1; $i <= $requests; $i++) {
+        try {
+            $target = $balancer->nextBackend();
+        } catch (\RuntimeException $e) {
+            $this->error($e->getMessage());
+            return;
+        }
+
+        $recorder->record($target, 'round_robin', $i);
+        $counts[$target] = ($counts[$target] ?? 0) + 1;
+    }
+
+    $this->table(
+        ['Server', 'Hits', 'Share %'],
+        collect($counts)->map(function (int $hits, string $server) use ($requests) {
+            return [
+                $server,
+                $hits,
+                round(($hits / $requests) * 100, 1).'%',
+            ];
+        })->values()->all()
+    );
+
+    $this->line('');
+    $this->info('Run GET /api/load/distribution-stats for the same totals from the database.');
+})->purpose('Simulate Round Robin request distribution across virtual backends');
