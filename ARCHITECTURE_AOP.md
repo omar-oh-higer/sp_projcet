@@ -28,6 +28,8 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Product catalog cache (Cache-Aside) | `CachedProductLookup`, `DirectProductLookup`, `ProductCacheInvalidator` | Task 6: Redis distributed cache |
 | Cache invalidation after purchase | `StockPurchaseService` → `ProductCacheInvalidator::forget()` | **After-advice style** side effect when stock changes |
 | **Distributed inventory lock** | `InventoryDistributedLock`, `DistributedLockStockPurchaseService` | **Before coordination** — Redis mutex across app servers before DB purchase (Task 7) |
+| **ACID composite checkout** | `AcidCheckoutService`, `NonAtomicCheckoutService` | **Core** — payment + stock + order; Task 8 before/after |
+| **Invoice after ACID commit** | `AcidCheckoutService` → `ReleaseInvoiceJob::dispatch()->afterCommit()` | **Post-commit side effect** — durability of checkout first, async invoice second (Task 3) |
 
 ## Routes
 
@@ -41,6 +43,9 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 - `POST /api/buy-optimistic` — Task 7 before (optimistic versioning).
 - `POST /api/buy-distributed-lock` — Task 7 after (Redis lock + pessimistic DB).
 - `GET /api/concurrency/stats` — lock/conflict demo metrics.
+- `POST /api/checkout/non-atomic` — Task 8 before (multi-step, no single transaction).
+- `POST /api/checkout/acid` — Task 8 after (ACID payment + stock + order).
+- `GET /api/checkout/integrity-stats` — orphan payments / violation metrics.
 
 ## Performance monitoring flow (around advice)
 

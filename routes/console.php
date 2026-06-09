@@ -442,3 +442,64 @@ Artisan::command('concurrency:stress {--product=1} {--requests=20} {--strategy=o
     $this->info('Metrics: '.json_encode(app(\App\Services\ConcurrencyControl\ConcurrencyControlMetrics::class)->snapshot()));
     $this->line('Run GET /api/concurrency/stats for the same counters.');
 })->purpose('Stress-test optimistic vs distributed inventory locking');
+
+Artisan::command('checkout:integrity-demo {--product=1} {--fail-at=after_payment} {--mode=non-atomic}', function () {
+    $productId = max((int) $this->option('product'), 1);
+    $failAt = (string) $this->option('fail-at');
+    $mode = (string) $this->option('mode');
+
+    if (! in_array($failAt, ['after_payment', 'after_stock'], true)) {
+        $this->error('Invalid --fail-at. Use after_payment or after_stock.');
+
+        return;
+    }
+
+    if (! in_array($mode, ['non-atomic', 'acid'], true)) {
+        $this->error('Invalid --mode. Use non-atomic or acid.');
+
+        return;
+    }
+
+    $product = Product::query()->find($productId);
+    if (! $product) {
+        $this->error('Product not found for id '.$productId);
+
+        return;
+    }
+
+    $this->info('Task 8: checkout integrity demo — '.$mode.' (fail at '.$failAt.')');
+    $this->line('Product #'.$productId.' stock='.$product->stock.' price_cents='.$product->price_cents);
+    $this->line('');
+
+    $paymentsBefore = \App\Models\Payment::query()->count();
+    $ordersBefore = Order::query()->count();
+    $stockBefore = $product->stock;
+
+    $service = $mode === 'acid'
+        ? app(\App\Services\TransactionIntegrity\AcidCheckoutService::class)
+        : app(\App\Services\TransactionIntegrity\NonAtomicCheckoutService::class);
+
+    $result = $service->checkout(
+        productId: $productId,
+        quantity: 1,
+        userId: null,
+        simulateFailAt: $failAt,
+        paymentDeclined: false,
+    );
+
+    $product->refresh();
+
+    $this->table(
+        ['Metric', 'Before', 'After'],
+        [
+            ['payments', $paymentsBefore, \App\Models\Payment::query()->count()],
+            ['orders', $ordersBefore, Order::query()->count()],
+            ['stock', $stockBefore, $product->stock],
+        ]
+    );
+
+    $this->line('');
+    $this->info('Result: '.json_encode($result));
+    $this->line('Orphan payments: '.app(\App\Services\TransactionIntegrity\CheckoutIntegrityMetrics::class)->orphanPaymentCount());
+    $this->line('Run GET /api/checkout/integrity-stats for full metrics.');
+})->purpose('Demonstrate non-atomic vs ACID checkout rollback under simulated failure');

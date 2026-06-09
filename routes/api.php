@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CheckoutIntegrityController;
 use App\Http\Controllers\DailySalesTallyController;
 use App\Http\Controllers\InventoryConcurrencyController;
 use App\Http\Controllers\LoadDistributionController;
@@ -20,6 +21,11 @@ use Illuminate\Support\Facades\Route;
     Route::post('/buy-optimistic', [InventoryConcurrencyController::class, 'buyOptimistic']);
     Route::get('/concurrency/stats', [InventoryConcurrencyController::class, 'stats']);
     Route::post('/concurrency/reset', [InventoryConcurrencyController::class, 'reset']);
+
+    Route::post('/checkout/non-atomic', [CheckoutIntegrityController::class, 'checkoutNonAtomic']);
+    Route::post('/checkout/acid', [CheckoutIntegrityController::class, 'checkoutAcid']);
+    Route::get('/checkout/integrity-stats', [CheckoutIntegrityController::class, 'stats']);
+    Route::post('/checkout/integrity-reset', [CheckoutIntegrityController::class, 'reset']);
 
     Route::post('/tally-daily-sales-wait', [DailySalesTallyController::class, 'tallyWait']);
     Route::post('/tally-daily-sales-queued', [DailySalesTallyController::class, 'tallyQueued']);

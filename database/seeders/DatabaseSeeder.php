@@ -25,18 +25,21 @@ class DatabaseSeeder extends Seeder
             [
                 'name' => 'Demo Keyboard',
                 'stock' => 40,
+                'price_cents' => 7999,
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
                 'name' => 'Demo Mouse',
                 'stock' => 60,
+                'price_cents' => 2999,
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
                 'name' => 'Demo Monitor',
                 'stock' => 20,
+                'price_cents' => 24999,
                 'created_at' => now(),
                 'updated_at' => now(),
             ],

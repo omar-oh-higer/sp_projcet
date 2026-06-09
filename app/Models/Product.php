@@ -10,7 +10,7 @@ class Product extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'stock', 'version'];
+    protected $fillable = ['name', 'stock', 'price_cents', 'version'];
 
     protected function casts(): array
     {
