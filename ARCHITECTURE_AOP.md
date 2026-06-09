@@ -30,6 +30,8 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | **Distributed inventory lock** | `InventoryDistributedLock`, `DistributedLockStockPurchaseService` | **Before coordination** — Redis mutex across app servers before DB purchase (Task 7) |
 | **ACID composite checkout** | `AcidCheckoutService`, `NonAtomicCheckoutService` | **Core** — payment + stock + order; Task 8 before/after |
 | **Invoice after ACID commit** | `AcidCheckoutService` → `ReleaseInvoiceJob::dispatch()->afterCommit()` | **Post-commit side effect** — durability of checkout first, async invoice second (Task 3) |
+| **Concurrent stress testing** | `ConcurrentStressRunner`, `stress:concurrent` | **Benchmarking** — `Http::pool` 100+ users; report latency + integrity (Task 9) |
+| **Latency measurement for stress** | `MeasureRequestPerformance` → `X-Response-Time-Ms` | Stress report reads server-side span times (Session 8 tracing/benchmarking) |
 
 ## Routes
 
@@ -46,6 +48,8 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 - `POST /api/checkout/non-atomic` — Task 8 before (multi-step, no single transaction).
 - `POST /api/checkout/acid` — Task 8 after (ACID payment + stock + order).
 - `GET /api/checkout/integrity-stats` — orphan payments / violation metrics.
+- `GET /api/stress/last-report` — Task 9 last concurrent stress report (JSON).
+- `php artisan stress:concurrent` — Task 9 load test (Artisan only, not HTTP trigger).
 
 ## Performance monitoring flow (around advice)
 
@@ -84,7 +88,8 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/performance/reset" -H "Accept: a
 ## Config
 
 - `config/performance_monitoring.php` — enabled, slow threshold, persist, response header
-- Env: `PERFORMANCE_MONITORING_ENABLED`, `PERFORMANCE_SLOW_THRESHOLD_MS`
+- `config/stress_testing.php` — default users (100), base URL, crash threshold, report paths
+- Env: `PERFORMANCE_MONITORING_ENABLED`, `PERFORMANCE_SLOW_THRESHOLD_MS`, `STRESS_TEST_USERS`, `STRESS_TEST_BASE_URL`
 
 ## Further study (optional)
 

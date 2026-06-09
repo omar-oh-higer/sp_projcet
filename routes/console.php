@@ -503,3 +503,118 @@ Artisan::command('checkout:integrity-demo {--product=1} {--fail-at=after_payment
     $this->line('Orphan payments: '.app(\App\Services\TransactionIntegrity\CheckoutIntegrityMetrics::class)->orphanPaymentCount());
     $this->line('Run GET /api/checkout/integrity-stats for full metrics.');
 })->purpose('Demonstrate non-atomic vs ACID checkout rollback under simulated failure');
+
+Artisan::command('stress:concurrent {--users=} {--product=1} {--quantity=} {--baseUrl=} {--scenario=safe} {--output=both}', function () {
+    $users = (int) ($this->option('users') ?: config('stress_testing.default_users', 100));
+    $productId = max((int) $this->option('product'), 1);
+    $quantity = (int) ($this->option('quantity') ?: config('stress_testing.default_quantity', 1));
+    $baseUrl = rtrim((string) ($this->option('baseUrl') ?: config('stress_testing.default_base_url')), '/');
+    $scenarioKey = (string) $this->option('scenario');
+    $output = (string) $this->option('output');
+
+    if ($users < 1) {
+        $this->error('--users must be at least 1');
+
+        return;
+    }
+
+    if (! in_array($output, ['console', 'md', 'json', 'both'], true)) {
+        $this->error('Invalid --output. Use console, md, json, or both.');
+
+        return;
+    }
+
+    $product = Product::query()->find($productId);
+    if (! $product) {
+        $this->error('Product not found for id '.$productId);
+
+        return;
+    }
+
+    try {
+        $scenarios = \App\Services\StressTesting\StressTestScenario::forKey($scenarioKey);
+    } catch (\InvalidArgumentException $exception) {
+        $this->error($exception->getMessage());
+
+        return;
+    }
+
+    $runner = app(\App\Services\StressTesting\ConcurrentStressRunner::class);
+    $checker = app(\App\Services\StressTesting\StressTestIntegrityChecker::class);
+    $reportBuilder = app(\App\Services\StressTesting\StressTestReportBuilder::class);
+    $timeout = (int) config('stress_testing.request_timeout_seconds', 30);
+
+    $this->info('Task 9: concurrent stress test — '.$scenarioKey.' ('.$users.' simultaneous users)');
+    $this->line('Base URL: '.$baseUrl);
+    $this->line('Product #'.$productId.' stock='.$product->stock.' price_cents='.$product->price_cents);
+    $this->line('Ensure php artisan serve is running on '.$baseUrl);
+    $this->line('');
+
+    $reports = [];
+
+    foreach ($scenarios as $scenario) {
+        $this->info('Scenario: '.$scenario->label.' → POST '.$scenario->path);
+
+        $before = $checker->snapshot($productId);
+
+        $runMetrics = $runner->run(
+            baseUrl: $baseUrl,
+            path: $scenario->path,
+            productId: $productId,
+            quantity: $quantity,
+            users: $users,
+            timeoutSeconds: $timeout,
+        );
+
+        $after = $checker->snapshot($productId);
+
+        $integrity = $checker->evaluate(
+            before: $before,
+            after: $after,
+            successRequests: $runMetrics['success_requests'],
+            quantity: $quantity,
+            scenario: $scenario,
+        );
+
+        $report = $reportBuilder->build(
+            scenario: $scenario,
+            productId: $productId,
+            quantity: $quantity,
+            users: $users,
+            baseUrl: $baseUrl,
+            runMetrics: $runMetrics,
+            integrity: $integrity,
+        );
+
+        $reports[] = $report;
+
+        $this->table(
+            ['Metric', 'Value'],
+            [
+                ['Total Requests', $report['total_requests']],
+                ['Success Requests', $report['success_requests']],
+                ['Failed Requests', $report['failed_requests']],
+                ['Rejected (409)', $report['rejected_requests']],
+                ['Average Response Time (ms)', $report['average_response_time_ms'] ?? 'n/a'],
+                ['System Crashed', $report['system_crashed'] ? 'Yes' : 'No'],
+                ['Data Integrity Pass', $report['data_integrity_pass'] ? 'Yes' : 'No'],
+            ]
+        );
+
+        $this->line($report['explanation']);
+        $this->line('');
+    }
+
+    if (in_array($output, ['md', 'json', 'both'], true)) {
+        $reportBuilder->writeCombinedReport($reports, $output === 'both' ? 'both' : $output);
+        $this->info('Report written to:');
+        if (in_array($output, ['json', 'both'], true)) {
+            $this->line('  JSON: '.config('stress_testing.report_json_path'));
+        }
+        if (in_array($output, ['md', 'both'], true)) {
+            $this->line('  Markdown: '.config('stress_testing.report_markdown_path'));
+        }
+    }
+
+    $this->line('Read back via GET /api/stress/last-report');
+})->purpose('Run 100+ concurrent checkout stress test and generate report');

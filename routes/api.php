@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\StressTestController;
 use App\Http\Controllers\CheckoutIntegrityController;
 use App\Http\Controllers\DailySalesTallyController;
 use App\Http\Controllers\InventoryConcurrencyController;
@@ -26,6 +27,9 @@ use Illuminate\Support\Facades\Route;
     Route::post('/checkout/acid', [CheckoutIntegrityController::class, 'checkoutAcid']);
     Route::get('/checkout/integrity-stats', [CheckoutIntegrityController::class, 'stats']);
     Route::post('/checkout/integrity-reset', [CheckoutIntegrityController::class, 'reset']);
+
+    Route::get('/stress/last-report', [StressTestController::class, 'lastReport']);
+    Route::post('/stress/reset', [StressTestController::class, 'reset']);
 
     Route::post('/tally-daily-sales-wait', [DailySalesTallyController::class, 'tallyWait']);
     Route::post('/tally-daily-sales-queued', [DailySalesTallyController::class, 'tallyQueued']);

@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Services\ConcurrencyControl\ConcurrencyControlMetrics;
 use App\Services\ProductCatalog\ProductCatalogMetrics;
+use App\Services\StressTesting\StressTestMetrics;
 use App\Services\TransactionIntegrity\CheckoutIntegrityMetrics;
 use Illuminate\Support\ServiceProvider;
 
@@ -17,6 +18,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ProductCatalogMetrics::class);
         $this->app->singleton(ConcurrencyControlMetrics::class);
         $this->app->singleton(CheckoutIntegrityMetrics::class);
+        $this->app->singleton(StressTestMetrics::class);
     }
 
     /**
