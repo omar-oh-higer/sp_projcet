@@ -382,3 +382,63 @@ Artisan::command('products:cache-warm', function () {
     $this->line('');
     $this->info('Run GET /api/cache/stats or call /cached twice to see hit rate.');
 })->purpose('Warm popular product catalog entries into Redis cache');
+
+// Task 7: stress optimistic vs distributed inventory locking
+Artisan::command('concurrency:stress {--product=1} {--requests=20} {--strategy=optimistic}', function () {
+    $productId = max((int) $this->option('product'), 1);
+    $requests = max((int) $this->option('requests'), 1);
+    $strategy = (string) $this->option('strategy');
+
+    $product = \App\Models\Product::query()->find($productId);
+    if (! $product) {
+        $this->error('Product not found for id '.$productId);
+
+        return;
+    }
+
+    $this->info('Task 7: concurrency stress — '.$strategy);
+    $this->line('Product #'.$productId.' stock='.$product->stock.' version='.$product->version);
+    $this->line('Requests: '.$requests);
+    $this->line('Lock store: '.config('inventory_locking.lock_store', 'redis'));
+    $this->line('');
+
+    app(\App\Services\ConcurrencyControl\ConcurrencyControlMetrics::class)->reset();
+
+    $optimistic = app(\App\Services\ConcurrencyControl\OptimisticStockPurchaseService::class);
+    $distributed = app(\App\Services\ConcurrencyControl\DistributedLockStockPurchaseService::class);
+
+    $counts = [
+        'success' => 0,
+        'version_conflict' => 0,
+        'insufficient_stock' => 0,
+        'lock_timeout' => 0,
+        'other' => 0,
+    ];
+
+    for ($i = 1; $i <= $requests; $i++) {
+        if ($strategy === 'distributed') {
+            $result = $distributed->purchase($productId, 1);
+        } else {
+            $result = $optimistic->purchase($productId, 1, null, 50);
+        }
+
+        $status = $result['status'];
+        if (isset($counts[$status])) {
+            $counts[$status]++;
+        } else {
+            $counts['other']++;
+        }
+    }
+
+    $product->refresh();
+
+    $this->table(
+        ['Outcome', 'Count'],
+        collect($counts)->map(fn (int $count, string $key) => [$key, $count])->values()->all()
+    );
+
+    $this->line('');
+    $this->line('Final stock: '.$product->stock.' (version '.$product->version.')');
+    $this->info('Metrics: '.json_encode(app(\App\Services\ConcurrencyControl\ConcurrencyControlMetrics::class)->snapshot()));
+    $this->line('Run GET /api/concurrency/stats for the same counters.');
+})->purpose('Stress-test optimistic vs distributed inventory locking');

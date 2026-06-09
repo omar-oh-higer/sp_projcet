@@ -27,6 +27,7 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Load distribution (single vs Round Robin) | `LoadDistributionController`, `RoundRobinLoadBalancer`, `BackendHealthRegistry` | Task 5: horizontal scaling simulation |
 | Product catalog cache (Cache-Aside) | `CachedProductLookup`, `DirectProductLookup`, `ProductCacheInvalidator` | Task 6: Redis distributed cache |
 | Cache invalidation after purchase | `StockPurchaseService` → `ProductCacheInvalidator::forget()` | **After-advice style** side effect when stock changes |
+| **Distributed inventory lock** | `InventoryDistributedLock`, `DistributedLockStockPurchaseService` | **Before coordination** — Redis mutex across app servers before DB purchase (Task 7) |
 
 ## Routes
 
@@ -37,6 +38,9 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 - `GET /api/products/{id}/direct` — Task 6 before (always DB).
 - `GET /api/products/{id}/cached` — Task 6 after (Cache-Aside via Redis store).
 - `GET /api/cache/stats` — product cache hit/miss metrics.
+- `POST /api/buy-optimistic` — Task 7 before (optimistic versioning).
+- `POST /api/buy-distributed-lock` — Task 7 after (Redis lock + pessimistic DB).
+- `GET /api/concurrency/stats` — lock/conflict demo metrics.
 
 ## Performance monitoring flow (around advice)
 

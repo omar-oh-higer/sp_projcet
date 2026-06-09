@@ -10,7 +10,14 @@ class Product extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'stock'];
+    protected $fillable = ['name', 'stock', 'version'];
+
+    protected function casts(): array
+    {
+        return [
+            'version' => 'integer',
+        ];
+    }
 
     public function orders(): HasMany
     {

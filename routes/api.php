@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DailySalesTallyController;
+use App\Http\Controllers\InventoryConcurrencyController;
 use App\Http\Controllers\LoadDistributionController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PerformanceMonitoringController;
@@ -13,7 +14,12 @@ use Illuminate\Support\Facades\Route;
     Route::middleware('circuit.breaker')->group(function () {
         Route::post('/buy-with-lock', [OrderController::class, 'buyWithLock']);
         Route::post('/buy-with-lock-wait-invoice', [OrderController::class, 'buyWithLockWaitForInvoice']);
+        Route::post('/buy-distributed-lock', [InventoryConcurrencyController::class, 'buyDistributedLock']);
     });
+
+    Route::post('/buy-optimistic', [InventoryConcurrencyController::class, 'buyOptimistic']);
+    Route::get('/concurrency/stats', [InventoryConcurrencyController::class, 'stats']);
+    Route::post('/concurrency/reset', [InventoryConcurrencyController::class, 'reset']);
 
     Route::post('/tally-daily-sales-wait', [DailySalesTallyController::class, 'tallyWait']);
     Route::post('/tally-daily-sales-queued', [DailySalesTallyController::class, 'tallyQueued']);
