@@ -8,10 +8,11 @@ use Illuminate\Support\Facades\DB;
 /** Persists each routing decision and aggregates stats for the demo API. */
 class LoadDistributionRecorder
 {
-    public function record(string $targetServer, string $distributionMode, ?int $requestIndex = null): void
+    public function record(string $targetServer, string $distributionMode, ?int $requestIndex = null, ?int $targetPort = null): void
     {
         LoadDistributionHit::query()->create([
             'target_server' => $targetServer,
+            'target_port' => $targetPort,
             'distribution_mode' => $distributionMode,
             'request_index' => $requestIndex,
         ]);

@@ -19,6 +19,7 @@
 /storage/*.key
 /storage/pail
 /storage/docs
+/storage/explain
 /vendor
 Homestead.json
 Homestead.yaml

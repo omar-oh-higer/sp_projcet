@@ -25,6 +25,7 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Invoice queued vs inline | `OrderController` methods + jobs | **Core** for this demo; could later move to a strategy or domain event |
 | Daily sales tally (batch vs inline) | `DailySalesTallyController`, `ProcessDailySalesTallyJob` | Task 4: batch processing demo |
 | Load distribution (single vs Round Robin) | `LoadDistributionController`, `RoundRobinLoadBalancer`, `BackendHealthRegistry` | Task 5: horizontal scaling simulation |
+| **Multi-port worker + gateway** | `MultiServerProcessGateway`, `NodeIdentity`, `BackendPool`, `load:multi-server` | Task 5: real HTTP to ports 8000–8002 |
 | Product catalog cache (Cache-Aside) | `CachedProductLookup`, `DirectProductLookup`, `ProductCacheInvalidator` | Task 6: Redis distributed cache |
 | Cache invalidation after purchase | `StockPurchaseService` → `ProductCacheInvalidator::forget()` | **After-advice style** side effect when stock changes |
 | **Distributed inventory lock** | `InventoryDistributedLock`, `DistributedLockStockPurchaseService` | **Before coordination** — Redis mutex across app servers before DB purchase (Task 7) |
@@ -32,6 +33,8 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | **Invoice after ACID commit** | `AcidCheckoutService` → `ReleaseInvoiceJob::dispatch()->afterCommit()` | **Post-commit side effect** — durability of checkout first, async invoice second (Task 3) |
 | **Concurrent stress testing** | `ConcurrentStressRunner`, `stress:concurrent` | **Benchmarking** — `Http::pool` 100+ users; report latency + integrity (Task 9) |
 | **Latency measurement for stress** | `MeasureRequestPerformance` → `X-Response-Time-Ms` | Stress report reads server-side span times (Session 8 tracing/benchmarking) |
+| **Span tracing + bottleneck ID** | `RequestSpanTracer`, `SlowSalesReportService` / `OptimizedSalesReportService` | Task 10 — internal spans, `X-Trace-Id`, bottleneck logs |
+| **Before/after benchmark comparison** | `benchmark:compare`, `BenchmarkComparisonBuilder` | Task 10 — numerical ms + query reduction report |
 
 ## Routes
 
@@ -50,6 +53,16 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 - `GET /api/checkout/integrity-stats` — orphan payments / violation metrics.
 - `GET /api/stress/last-report` — Task 9 last concurrent stress report (JSON).
 - `php artisan stress:concurrent` — Task 9 load test (Artisan only, not HTTP trigger).
+- `GET /api/benchmark/sales-report/slow` — Task 10 before (sequential DB bottleneck).
+- `GET /api/benchmark/sales-report/optimized` — Task 10 after (eager load).
+- `GET /api/benchmark/comparison` — Task 10 numerical before/after report.
+- `php artisan benchmark:compare` — Task 10 full benchmark cycle.
+- `POST /api/load/process` — Task 5 worker node (returns `node_port` for this instance).
+- `POST /process` — same worker (web alias).
+- `POST /api/load/process-single` — Task 5 gateway before (always forwards to port 8000).
+- `POST /api/load/process-balanced` — Task 5 gateway after (Round Robin over HTTP).
+- `php artisan load:multi-server` — Task 5 CLI demo (`Task N -> Handled by node on port X`).
+- `scripts/start-multi-server.ps1` — launch nodes on ports 8000–8002.
 
 ## Performance monitoring flow (around advice)
 
@@ -89,7 +102,8 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/performance/reset" -H "Accept: a
 
 - `config/performance_monitoring.php` — enabled, slow threshold, persist, response header
 - `config/stress_testing.php` — default users (100), base URL, crash threshold, report paths
-- Env: `PERFORMANCE_MONITORING_ENABLED`, `PERFORMANCE_SLOW_THRESHOLD_MS`, `STRESS_TEST_USERS`, `STRESS_TEST_BASE_URL`
+- `config/benchmarking.php` — sample orders, sequential delay, comparison report paths
+- Env: `PERFORMANCE_MONITORING_ENABLED`, `PERFORMANCE_SLOW_THRESHOLD_MS`, `STRESS_TEST_USERS`, `BENCHMARK_SEQUENTIAL_DELAY_MS`
 
 ## Further study (optional)
 

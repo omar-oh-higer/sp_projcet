@@ -359,6 +359,77 @@ Artisan::command('load:distribute {--requests=30}', function () {
     $this->info('Run GET /api/load/distribution-stats for the same totals from the database.');
 })->purpose('Simulate Round Robin request distribution across virtual backends');
 
+// Task 5: real multi-port HTTP demo (3 artisan serve instances on 8000/8001/8002)
+Artisan::command('load:multi-server {--tasks=12} {--mode=balanced} {--gateway=} {--reset}', function () {
+    $tasks = max((int) $this->option('tasks'), 1);
+    $mode = strtolower((string) $this->option('mode'));
+    $gatewayUrl = rtrim((string) ($this->option('gateway') ?: config('load_balancing.gateway_url', 'http://127.0.0.1:8000')), '/');
+
+    if (! in_array($mode, ['balanced', 'single'], true)) {
+        $this->error('Invalid --mode. Use balanced or single.');
+        return 1;
+    }
+
+    $endpoint = $mode === 'single'
+        ? '/api/load/process-single'
+        : '/api/load/process-balanced';
+
+    if ($this->option('reset')) {
+        $resetResponse = Http::post($gatewayUrl.'/api/load/distribution-reset');
+        if ($resetResponse->successful()) {
+            $this->line('Load distribution demo data reset.');
+        }
+    }
+
+    $balancer = app(\App\Services\LoadBalancing\RoundRobinLoadBalancer::class);
+    $balancer->resetRotation();
+
+    $this->info('Task 5: Multi-port real server simulation');
+    $this->line('Gateway: '.$gatewayUrl);
+    $this->line('Mode: '.$mode);
+    $this->line('Tasks: '.$tasks);
+    $this->line('');
+    $this->warn('Ensure all nodes are running: .\\scripts\\start-multi-server.ps1');
+    $this->line('');
+
+    $failures = 0;
+
+    for ($task = 1; $task <= $tasks; $task++) {
+        try {
+            $response = Http::timeout((int) config('load_balancing.http_timeout', 5))
+                ->acceptJson()
+                ->post($gatewayUrl.$endpoint, ['task_number' => $task]);
+        } catch (\Throwable $e) {
+            $failures++;
+            $this->error("Task {$task} -> Connection failed ({$e->getMessage()})");
+            continue;
+        }
+
+        if (! $response->successful()) {
+            $failures++;
+            $this->error("Task {$task} -> Gateway error HTTP {$response->status()}");
+            continue;
+        }
+
+        $body = $response->json();
+        $port = (int) ($body['target_port'] ?? $body['worker_response']['node_port'] ?? 0);
+        $handledBy = (string) ($body['handled_by'] ?? "node on port {$port}");
+
+        $this->line("Task {$task} -> Handled by {$handledBy}");
+    }
+
+    $this->line('');
+
+    if ($failures > 0) {
+        $this->warn("Completed with {$failures} failure(s). Start all nodes and use CACHE_STORE=database.");
+        return 1;
+    }
+
+    $this->info('Done. Run GET /api/load/distribution-stats for hit totals.');
+
+    return 0;
+})->purpose('Send tasks through the gateway to real worker nodes on ports 8000-8002');
+
 // Task 6: warm popular products into Redis (Cache-Aside)
 Artisan::command('products:cache-warm', function () {
     $lookup = app(\App\Services\ProductCatalog\CachedProductLookup::class);
@@ -618,3 +689,107 @@ Artisan::command('stress:concurrent {--users=} {--product=1} {--quantity=} {--ba
 
     $this->line('Read back via GET /api/stress/last-report');
 })->purpose('Run 100+ concurrent checkout stress test and generate report');
+
+Artisan::command('benchmark:compare {--product=1} {--iterations=} {--baseUrl=} {--output=both}', function () {
+    $productId = max((int) $this->option('product'), 1);
+    $iterations = max((int) ($this->option('iterations') ?: config('benchmarking.default_iterations', 5)), 1);
+    $baseUrl = rtrim((string) ($this->option('baseUrl') ?: config('benchmarking.default_base_url')), '/');
+    $output = (string) $this->option('output');
+
+    $product = Product::query()->find($productId);
+    if (! $product) {
+        $this->error('Product not found for id '.$productId);
+
+        return;
+    }
+
+    $orderCount = Order::query()
+        ->where('product_id', $productId)
+        ->where('status', 'success')
+        ->count();
+
+    if ($orderCount < 5) {
+        $this->warn('Few orders found ('.$orderCount.'). Run: php artisan db:seed --class=BenchmarkOrdersSeeder');
+    }
+
+    $this->info('Task 10: benchmark compare — '.$iterations.' iterations per mode');
+    $this->line('Product #'.$productId.' | Base URL: '.$baseUrl);
+    $this->line('Ensure php artisan serve is running.');
+    $this->line('');
+
+    $slowSamples = [];
+    $optimizedSamples = [];
+    $bottleneckSpan = null;
+
+    for ($i = 1; $i <= $iterations; $i++) {
+        $slowResponse = \Illuminate\Support\Facades\Http::timeout(60)
+            ->acceptJson()
+            ->get($baseUrl.'/api/benchmark/sales-report/slow', ['product_id' => $productId]);
+
+        if ($slowResponse->successful()) {
+            $body = $slowResponse->json();
+            $slowSamples[] = [
+                'total_duration_ms' => (float) ($body['total_duration_ms'] ?? 0),
+                'db_queries' => (int) ($body['db_queries'] ?? 0),
+            ];
+            $bottleneckSpan = $body['bottleneck_span'] ?? $bottleneckSpan;
+        }
+
+        $optimizedResponse = \Illuminate\Support\Facades\Http::timeout(60)
+            ->acceptJson()
+            ->get($baseUrl.'/api/benchmark/sales-report/optimized', ['product_id' => $productId]);
+
+        if ($optimizedResponse->successful()) {
+            $body = $optimizedResponse->json();
+            $optimizedSamples[] = [
+                'total_duration_ms' => (float) ($body['total_duration_ms'] ?? 0),
+                'db_queries' => (int) ($body['db_queries'] ?? 0),
+            ];
+        }
+    }
+
+    if ($slowSamples === [] || $optimizedSamples === []) {
+        $this->error('Benchmark requests failed. Is php artisan serve running on '.$baseUrl.'?');
+
+        return;
+    }
+
+    $builder = app(\App\Services\Benchmarking\BenchmarkComparisonBuilder::class);
+    $comparison = $builder->build($productId, $slowSamples, $optimizedSamples, $bottleneckSpan);
+
+    if (in_array($output, ['md', 'json', 'both'], true)) {
+        $builder->writeReportFiles($comparison, $output);
+    }
+
+    $this->table(
+        ['Metric', 'Before (slow)', 'After (optimized)', 'Improvement'],
+        [
+            [
+                'Avg response time (ms)',
+                $comparison['before']['avg_response_time_ms'],
+                $comparison['after']['avg_response_time_ms'],
+                $comparison['improvement']['response_time_percent_faster'].'% faster',
+            ],
+            [
+                'DB queries',
+                $comparison['before']['avg_db_queries'],
+                $comparison['after']['avg_db_queries'],
+                $comparison['improvement']['db_queries_percent_fewer'].'% fewer',
+            ],
+            [
+                'Bottleneck span',
+                $comparison['before']['bottleneck_span'],
+                'eager_load_with_product',
+                'fixed',
+            ],
+        ]
+    );
+
+    $this->line('');
+    $this->info($comparison['explanation']);
+    $this->line('');
+    $this->line('GET /api/benchmark/comparison');
+    if (in_array($output, ['md', 'both'], true)) {
+        $this->line('Markdown: '.config('benchmarking.report_markdown_path'));
+    }
+})->purpose('Benchmark slow vs optimized sales report and write comparison report');

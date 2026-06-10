@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BenchmarkController;
 use App\Http\Controllers\StressTestController;
 use App\Http\Controllers\CheckoutIntegrityController;
 use App\Http\Controllers\DailySalesTallyController;
@@ -31,12 +32,21 @@ use Illuminate\Support\Facades\Route;
     Route::get('/stress/last-report', [StressTestController::class, 'lastReport']);
     Route::post('/stress/reset', [StressTestController::class, 'reset']);
 
+    Route::get('/benchmark/sales-report/slow', [BenchmarkController::class, 'salesReportSlow']);
+    Route::get('/benchmark/sales-report/optimized', [BenchmarkController::class, 'salesReportOptimized']);
+    Route::get('/benchmark/comparison', [BenchmarkController::class, 'comparison']);
+    Route::get('/benchmark/traces', [BenchmarkController::class, 'traces']);
+    Route::post('/benchmark/reset', [BenchmarkController::class, 'reset']);
+
     Route::post('/tally-daily-sales-wait', [DailySalesTallyController::class, 'tallyWait']);
     Route::post('/tally-daily-sales-queued', [DailySalesTallyController::class, 'tallyQueued']);
     Route::get('/daily-sales-summary', [DailySalesTallyController::class, 'showSummary']);
 
     Route::post('/load/route-single', [LoadDistributionController::class, 'routeSingle']);
     Route::post('/load/route-balanced', [LoadDistributionController::class, 'routeBalanced']);
+    Route::post('/load/process', [LoadDistributionController::class, 'process']);
+    Route::post('/load/process-single', [LoadDistributionController::class, 'processSingle']);
+    Route::post('/load/process-balanced', [LoadDistributionController::class, 'processBalanced']);
     Route::get('/load/distribution-stats', [LoadDistributionController::class, 'stats']);
     Route::post('/load/set-server-health', [LoadDistributionController::class, 'setServerHealth']);
     Route::post('/load/distribution-reset', [LoadDistributionController::class, 'reset']);

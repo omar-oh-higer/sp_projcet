@@ -5,9 +5,12 @@ namespace App\Http\Controllers;
 use App\Http\Requests\SetServerHealthRequest;
 use App\Services\LoadBalancing\BackendHealthRegistry;
 use App\Services\LoadBalancing\LoadDistributionRecorder;
+use App\Services\LoadBalancing\MultiServerProcessGateway;
+use App\Services\LoadBalancing\NodeIdentity;
 use App\Services\LoadBalancing\RoundRobinLoadBalancer;
 use App\Services\LoadBalancing\SingleServerRouter;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /** Task 5: vertical (single server) vs horizontal (Round Robin) load distribution demo. */
 class LoadDistributionController extends Controller
@@ -99,5 +102,54 @@ class LoadDistributionController extends Controller
         return response()->json([
             'message' => 'Load distribution demo data reset.',
         ]);
+    }
+
+    /**
+     * Worker node: process a task on this instance (real multi-port demo).
+     * Each `php artisan serve --port=XXXX` returns its own node_id/node_port.
+     */
+    public function process(Request $request, NodeIdentity $identity): JsonResponse
+    {
+        $payload = $request->validate([
+            'task_number' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json($identity->processPayload((int) $payload['task_number']));
+    }
+
+    /**
+     * Gateway "before": always forward to single_target worker (port 8000).
+     */
+    public function processSingle(Request $request, MultiServerProcessGateway $gateway): JsonResponse
+    {
+        $payload = $request->validate([
+            'task_number' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $result = $gateway->forwardSingle((int) $payload['task_number']);
+
+        if (isset($result['error'])) {
+            return response()->json($result, $result['error'] === 'no_healthy_backends' ? 503 : 502);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * Gateway "after": Round Robin forward to healthy worker nodes over HTTP.
+     */
+    public function processBalanced(Request $request, MultiServerProcessGateway $gateway): JsonResponse
+    {
+        $payload = $request->validate([
+            'task_number' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $result = $gateway->forwardBalanced((int) $payload['task_number']);
+
+        if (isset($result['error'])) {
+            return response()->json($result, $result['error'] === 'no_healthy_backends' ? 503 : 502);
+        }
+
+        return response()->json($result);
     }
 }
