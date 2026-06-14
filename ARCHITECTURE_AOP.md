@@ -19,11 +19,11 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 | Circuit breaker **open** check | `app/Http/Middleware/EnsureCircuitBreakerClosed.php` | **Before advice** on locked purchase routes |
 | Circuit breaker **success** signal | `OrderController` after successful purchase | **After advice** (must run only on success, so it stays next to the happy path until you promote it to an event listener) |
 | **Performance monitoring (HTTP)** | `app/Http/Middleware/MeasureRequestPerformance.php` | **Around advice** on all API routes — times request, adds `X-Response-Time-Ms`, persists to `performance_measurements` |
-| **Performance monitoring (jobs)** | `app/Jobs/Middleware/MeasureJobPerformance.php` | **Around advice** on `ReleaseInvoiceJob` and `ProcessDailySalesTallyJob` |
+| **Performance monitoring (jobs)** | `app/Jobs/Middleware/MeasureJobPerformance.php` | **Around advice** on invoice/tally jobs |
 | Performance metrics storage / stats | `app/Services/PerformanceMonitoring/PerformanceMonitor.php`, `PerformanceMonitoringController` | Aspect core + read API (not business logic) |
 | Purchase + stock integrity | `StockPurchaseService` | **Core** business logic |
 | Invoice queued vs inline | `OrderController` methods + jobs | **Core** for this demo; could later move to a strategy or domain event |
-| Daily sales tally (batch vs inline) | `DailySalesTallyController`, `ProcessDailySalesTallyJob` | Task 4: batch processing demo |
+| Daily sales tally (batch vs inline) | `DailySalesTallyBatchOrchestrator`, `ProcessDailySalesChunkJob`, `FinalizeDailySalesTallyJob` | Task 4: **concurrent** batch via Bus::batch + thread pool |
 | Load distribution (single vs Round Robin) | `LoadDistributionController`, `RoundRobinLoadBalancer`, `BackendHealthRegistry` | Task 5: horizontal scaling simulation |
 | **Multi-port worker + gateway** | `MultiServerProcessGateway`, `NodeIdentity`, `BackendPool`, `load:multi-server` | Task 5: real HTTP to ports 8000–8002 |
 | Product catalog cache (Cache-Aside) | `CachedProductLookup`, `DirectProductLookup`, `ProductCacheInvalidator` | Task 6: Redis distributed cache |
@@ -56,7 +56,9 @@ This project uses **Laravel-native mechanisms** instead of a bytecode-weaving AO
 - `GET /api/benchmark/sales-report/slow` — Task 10 before (sequential DB bottleneck).
 - `GET /api/benchmark/sales-report/optimized` — Task 10 after (eager load).
 - `GET /api/benchmark/comparison` — Task 10 numerical before/after report.
-- `php artisan benchmark:compare` — Task 10 full benchmark cycle.
+- `POST /api/tally-daily-sales-wait` — Task 4 before (sequential inline).
+- `POST /api/tally-daily-sales-queued` — Task 4 after (concurrent `Bus::batch` chunks).
+- `php artisan tally:concurrent-demo {date}` — Task 4 parallel chunk demo.
 - `POST /api/load/process` — Task 5 worker node (returns `node_port` for this instance).
 - `POST /process` — same worker (web alias).
 - `POST /api/load/process-single` — Task 5 gateway before (always forwards to port 8000).

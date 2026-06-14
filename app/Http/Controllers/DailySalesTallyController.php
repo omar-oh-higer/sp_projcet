@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\TallyDailySalesRequest;
-use App\Jobs\ProcessDailySalesTallyJob;
 use App\Models\DailySalesSummary;
 use App\Models\Order;
+use App\Services\DailySalesTally\DailySalesTallyBatchOrchestrator;
 use Illuminate\Http\JsonResponse;
 
 /** Task 4 API: inline daily tally vs queued batched tally + read stored summary. */
@@ -61,20 +61,24 @@ class DailySalesTallyController extends Controller
     }
 
     /**
-     * Task 4 “after”: enqueue ProcessDailySalesTallyJob (batched chunkById inside the job).
-     * Run `php artisan queue:work` with QUEUE_CONNECTION=database to see it process; then GET
-     * daily-sales-summary for counts. Response returns immediately with no totals.
+     * Task 4 “after”: concurrent batch via Bus::batch — chunk jobs run in parallel on queue workers.
+     * Uses Task 3 (queue/thread pool) + Task 2 (max concurrent chunks semaphore).
      */
-    public function tallyQueued(TallyDailySalesRequest $request): JsonResponse
-    {
+    public function tallyQueued(
+        TallyDailySalesRequest $request,
+        DailySalesTallyBatchOrchestrator $orchestrator,
+    ): JsonResponse {
         $saleDate = $request->validated('sale_date');
 
-        ProcessDailySalesTallyJob::dispatch($saleDate);
+        $result = $orchestrator->start($saleDate);
 
         return response()->json([
-            'message' => 'Tally job queued. Run `php artisan queue:work`, then GET /api/daily-sales-summary for results.',
-            'processing_mode' => 'queued_batched',
+            'message' => 'Tally batch queued. Chunk jobs will run in parallel on queue workers.',
+            'processing_mode' => config('daily_sales_tally.processing_mode_concurrent', 'queued_batched_concurrent'),
             'sale_date' => $saleDate,
+            'expected_chunks' => $result['expected_chunks'],
+            'batch_id' => $result['batch_id'],
+            'concurrency_note' => 'Run multiple queue:work processes (thread pool from Task 3). Chunk concurrency capped by Task 2 semaphore.',
         ]);
     }
 

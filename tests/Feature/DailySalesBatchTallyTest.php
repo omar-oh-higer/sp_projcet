@@ -2,18 +2,28 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessDailySalesChunkJob;
 use App\Jobs\ProcessDailySalesTallyJob;
 use App\Models\DailySalesSummary;
+use App\Models\DailySalesTallyChunk;
 use App\Models\Product;
+use App\Services\DailySalesTally\DailySalesTallyBatchOrchestrator;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class DailySalesBatchTallyTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::forget('daily-sales-tally-chunk-semaphore:count');
+    }
 
     private function seedOrdersOnDate(string $saleDate, int $count, int $quantityEach = 2): int
     {
@@ -59,25 +69,32 @@ class DailySalesBatchTallyTest extends TestCase
         $this->assertSame('inline_unbatched', DailySalesSummary::query()->whereDate('sale_date', $day)->value('processing_mode'));
     }
 
-    public function test_tally_queued_dispatches_job_to_queue(): void
+    public function test_tally_queued_returns_concurrent_batch_metadata(): void
     {
-        Queue::fake();
+        Bus::fake();
 
         $day = '2026-05-16';
         $this->seedOrdersOnDate($day, 5, 1);
+
+        config(['daily_sales_tally.chunk_size' => 2]);
 
         $response = $this->postJson('/api/tally-daily-sales-queued', [
             'sale_date' => $day,
         ]);
 
         $response->assertOk()
-            ->assertJsonFragment(['processing_mode' => 'queued_batched'])
-            ->assertJsonFragment(['sale_date' => $day]);
+            ->assertJsonFragment(['processing_mode' => 'queued_batched_concurrent'])
+            ->assertJsonFragment(['sale_date' => $day])
+            ->assertJsonFragment(['expected_chunks' => 3])
+            ->assertJsonStructure(['batch_id', 'concurrency_note']);
 
-        Queue::assertPushed(ProcessDailySalesTallyJob::class, 1);
+        Bus::assertBatched(function ($batch) {
+            return $batch->jobs->count() === 3
+                && $batch->jobs->every(fn ($job) => $job instanceof ProcessDailySalesChunkJob);
+        });
     }
 
-    public function test_batched_job_matches_inline_totals(): void
+    public function test_concurrent_batch_matches_inline_totals(): void
     {
         $day = '2026-05-17';
         $this->seedOrdersOnDate($day, 25, 4);
@@ -87,14 +104,48 @@ class DailySalesBatchTallyTest extends TestCase
         $this->assertNotNull($inline);
 
         DailySalesSummary::query()->whereDate('sale_date', $day)->delete();
+        DailySalesTallyChunk::query()->delete();
 
-        (new ProcessDailySalesTallyJob($day, chunkSize: 7))->handle();
+        config(['daily_sales_tally.chunk_size' => 7]);
+
+        $orchestrator = app(DailySalesTallyBatchOrchestrator::class);
+        $result = $orchestrator->start($day);
+
+        $this->assertSame(4, $result['expected_chunks']);
+        $this->assertSame(4, DailySalesTallyChunk::query()->where('batch_id', $result['batch_id'])->count());
 
         $batched = DailySalesSummary::query()->whereDate('sale_date', $day)->first();
         $this->assertNotNull($batched);
         $this->assertSame($inline->successful_order_count, $batched->successful_order_count);
         $this->assertSame((int) $inline->total_quantity, (int) $batched->total_quantity);
-        $this->assertSame('queued_batched', $batched->processing_mode);
+        $this->assertSame('queued_batched_concurrent', $batched->processing_mode);
+    }
+
+    public function test_empty_day_finalizes_with_zero_totals(): void
+    {
+        $day = '2026-05-19';
+
+        $result = app(DailySalesTallyBatchOrchestrator::class)->start($day);
+
+        $this->assertSame(0, $result['expected_chunks']);
+
+        $summary = DailySalesSummary::query()->whereDate('sale_date', $day)->first();
+        $this->assertNotNull($summary);
+        $this->assertSame(0, (int) $summary->successful_order_count);
+        $this->assertSame(0, (int) $summary->total_quantity);
+        $this->assertSame('queued_batched_concurrent', $summary->processing_mode);
+    }
+
+    public function test_legacy_job_delegates_to_concurrent_orchestrator(): void
+    {
+        Bus::fake();
+
+        $day = '2026-05-20';
+        $this->seedOrdersOnDate($day, 3, 1);
+
+        (new ProcessDailySalesTallyJob($day, chunkSize: 2))->handle(app(DailySalesTallyBatchOrchestrator::class));
+
+        Bus::assertBatched(fn ($batch) => $batch->jobs->count() === 2);
     }
 
     public function test_summary_endpoint_returns_stored_row(): void

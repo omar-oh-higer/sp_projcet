@@ -11,21 +11,15 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * @deprecated Use DailySalesTallyBatchOrchestrator or DispatchDailySalesTallyBatchJob.
- * Kept for backward compatibility — delegates to concurrent batch pipeline.
+ * Task 4 coordinator: builds chunk jobs and submits a Bus::batch for parallel workers.
  */
-class ProcessDailySalesTallyJob implements ShouldQueue
+class DispatchDailySalesTallyBatchJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $chunkSize;
-
     public function __construct(
         public string $saleDate,
-        ?int $chunkSize = null,
-    ) {
-        $this->chunkSize = $chunkSize ?? (int) config('daily_sales_tally.chunk_size', 500);
-    }
+    ) {}
 
     /** @return array<int, class-string> */
     public function middleware(): array
@@ -35,10 +29,6 @@ class ProcessDailySalesTallyJob implements ShouldQueue
 
     public function handle(DailySalesTallyBatchOrchestrator $orchestrator): void
     {
-        if ($this->chunkSize !== (int) config('daily_sales_tally.chunk_size', 500)) {
-            config(['daily_sales_tally.chunk_size' => $this->chunkSize]);
-        }
-
         $orchestrator->start($this->saleDate);
     }
 }

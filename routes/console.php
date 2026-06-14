@@ -359,6 +359,34 @@ Artisan::command('load:distribute {--requests=30}', function () {
     $this->info('Run GET /api/load/distribution-stats for the same totals from the database.');
 })->purpose('Simulate Round Robin request distribution across virtual backends');
 
+// Task 4: concurrent daily sales tally demo (thread pool via queue workers)
+Artisan::command('tally:concurrent-demo {sale_date} {--chunk-size=}', function () {
+    $saleDate = (string) $this->argument('sale_date');
+    $chunkSize = $this->option('chunk-size');
+
+    if ($chunkSize !== null) {
+        config(['daily_sales_tally.chunk_size' => max((int) $chunkSize, 1)]);
+    }
+
+    $orchestrator = app(\App\Services\DailySalesTally\DailySalesTallyBatchOrchestrator::class);
+    $expected = $orchestrator->expectedChunkCount($saleDate);
+
+    $this->info('Task 4: Concurrent batch tally');
+    $this->line('Sale date: '.$saleDate);
+    $this->line('Chunk size: '.config('daily_sales_tally.chunk_size'));
+    $this->line('Expected chunks: '.$expected);
+    $this->line('Max concurrent chunks (Task 2 semaphore): '.config('daily_sales_tally.max_concurrent_chunks'));
+    $this->line('');
+    $this->warn('Start multiple workers in separate terminals: php artisan queue:work');
+    $this->line('');
+
+    $result = $orchestrator->start($saleDate);
+
+    $this->info('Batch dispatched.');
+    $this->line('Batch ID: '.$result['batch_id']);
+    $this->line('Then: GET /api/daily-sales-summary?sale_date='.$saleDate);
+})->purpose('Queue parallel chunk jobs for daily sales tally (Task 4 thread pool demo)');
+
 // Task 5: real multi-port HTTP demo (3 artisan serve instances on 8000/8001/8002)
 Artisan::command('load:multi-server {--tasks=12} {--mode=balanced} {--gateway=} {--reset}', function () {
     $tasks = max((int) $this->option('tasks'), 1);
