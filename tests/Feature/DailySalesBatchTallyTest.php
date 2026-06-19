@@ -23,6 +23,7 @@ class DailySalesBatchTallyTest extends TestCase
     {
         parent::setUp();
         Cache::forget('daily-sales-tally-chunk-semaphore:count');
+        config(['daily_sales_tally.demo_chunk_delay_seconds' => 0]);
     }
 
     private function seedOrdersOnDate(string $saleDate, int $count, int $quantityEach = 2): int
@@ -160,5 +161,115 @@ class DailySalesBatchTallyTest extends TestCase
             ->assertJsonFragment(['sale_date' => $day])
             ->assertJsonFragment(['successful_order_count' => 3])
             ->assertJsonFragment(['total_quantity' => 6]);
+    }
+
+    public function test_demo_seed_orders_for_today(): void
+    {
+        Product::query()->create(['name' => 'Seed Test', 'stock' => 100]);
+        $today = now()->toDateString();
+
+        $response = $this->postJson('/api/tally-demo/seed-orders', [
+            'sale_date' => $today,
+            'count' => 1200,
+            'clear_existing' => true,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonFragment(['sale_date' => $today])
+            ->assertJsonFragment(['inserted' => 1200])
+            ->assertJsonPath('expected_chunks_if_tally_now', 3);
+    }
+
+    public function test_batch_status_returns_chunks_and_summary(): void
+    {
+        $day = '2026-05-20';
+        $this->seedOrdersOnDate($day, 4, 2);
+        $batchId = 'test-batch-uuid';
+
+        DailySalesTallyChunk::query()->create([
+            'sale_date' => $day,
+            'batch_id' => $batchId,
+            'chunk_index' => 0,
+            'order_count' => 2,
+            'total_quantity' => 4,
+            'worker_pid' => 1001,
+            'worker_terminal' => 1,
+        ]);
+        DailySalesTallyChunk::query()->create([
+            'sale_date' => $day,
+            'batch_id' => $batchId,
+            'chunk_index' => 1,
+            'order_count' => 2,
+            'total_quantity' => 4,
+            'worker_pid' => 1002,
+            'worker_terminal' => 2,
+        ]);
+
+        DailySalesSummary::query()->create([
+            'sale_date' => $day,
+            'successful_order_count' => 4,
+            'total_quantity' => 8,
+            'processing_mode' => 'queued_batched_concurrent',
+            'computed_at' => now(),
+        ]);
+
+        $response = $this->getJson('/api/tally-demo/batch-status?sale_date='.$day.'&batch_id='.$batchId.'&expected_chunks=2');
+
+        $response->assertOk()
+            ->assertJsonFragment(['completed_chunks' => 2])
+            ->assertJsonFragment(['finalize_ready' => true])
+            ->assertJsonCount(2, 'chunks')
+            ->assertJsonCount(2, 'chunk_slots')
+            ->assertJsonCount(4, 'queue_terminals')
+            ->assertJsonPath('chunk_slots.0.status', 'completed')
+            ->assertJsonPath('chunk_slots.0.worker_label', 'queue:work #1');
+    }
+
+    public function test_batch_status_shows_double_duty_worker_when_five_chunks_four_workers(): void
+    {
+        $day = '2026-05-21';
+        $batchId = 'five-chunk-batch';
+        config(['daily_sales_tally.demo_worker_count' => 4]);
+
+        for ($i = 0; $i < 5; $i++) {
+            DailySalesTallyChunk::query()->create([
+                'sale_date' => $day,
+                'batch_id' => $batchId,
+                'chunk_index' => $i,
+                'order_count' => 500,
+                'total_quantity' => 1000,
+                'worker_pid' => $i < 4 ? 2000 + $i : 2000,
+                'worker_terminal' => $i < 4 ? $i + 1 : 1,
+            ]);
+        }
+
+        $response = $this->getJson('/api/tally-demo/batch-status?sale_date='.$day.'&batch_id='.$batchId.'&expected_chunks=5');
+
+        $response->assertOk()
+            ->assertJsonCount(5, 'chunk_slots')
+            ->assertJsonCount(4, 'queue_terminals')
+            ->assertJsonPath('double_duty_worker_number', 1)
+            ->assertJsonPath('worker_tracking_ok', true)
+            ->assertJsonPath('chunk_slots.4.worker_label', 'queue:work #1');
+    }
+
+    public function test_batch_status_warns_when_worker_terminal_missing(): void
+    {
+        $day = '2026-05-22';
+        $batchId = 'no-terminal-batch';
+
+        DailySalesTallyChunk::query()->create([
+            'sale_date' => $day,
+            'batch_id' => $batchId,
+            'chunk_index' => 0,
+            'order_count' => 500,
+            'total_quantity' => 1000,
+        ]);
+
+        $response = $this->getJson('/api/tally-demo/batch-status?sale_date='.$day.'&batch_id='.$batchId.'&expected_chunks=1');
+
+        $response->assertOk()
+            ->assertJsonPath('worker_tracking_ok', false)
+            ->assertJsonPath('chunk_slots.0.worker_label', 'queue:work (restart workers)');
     }
 }

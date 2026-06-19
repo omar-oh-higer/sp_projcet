@@ -11,13 +11,14 @@ use App\Http\Controllers\PerformanceMonitoringController;
 use App\Http\Controllers\ProductCatalogController;
 use Illuminate\Support\Facades\Route;
 
-// Route::middleware('throttle:purchases')->group(function () {
+Route::middleware('throttle:purchases')->group(function () {
     Route::post('/buy-without-lock', [OrderController::class, 'buyWithoutLock']);
 
     Route::middleware('circuit.breaker')->group(function () {
         Route::post('/buy-with-lock', [OrderController::class, 'buyWithLock']);
         Route::post('/buy-with-lock-wait-invoice', [OrderController::class, 'buyWithLockWaitForInvoice']);
         Route::post('/buy-distributed-lock', [InventoryConcurrencyController::class, 'buyDistributedLock']);
+    });
     });
 
     Route::post('/buy-optimistic', [InventoryConcurrencyController::class, 'buyOptimistic']);
@@ -41,6 +42,8 @@ use Illuminate\Support\Facades\Route;
     Route::post('/tally-daily-sales-wait', [DailySalesTallyController::class, 'tallyWait']);
     Route::post('/tally-daily-sales-queued', [DailySalesTallyController::class, 'tallyQueued']);
     Route::get('/daily-sales-summary', [DailySalesTallyController::class, 'showSummary']);
+    Route::post('/tally-demo/seed-orders', [DailySalesTallyController::class, 'seedDemoOrders']);
+    Route::get('/tally-demo/batch-status', [DailySalesTallyController::class, 'batchStatus']);
 
     Route::post('/load/route-single', [LoadDistributionController::class, 'routeSingle']);
     Route::post('/load/route-balanced', [LoadDistributionController::class, 'routeBalanced']);

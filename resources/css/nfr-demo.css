@@ -1,0 +1,63 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+.metric-bar-track {
+    @apply h-3 w-full rounded-full bg-slate-200 overflow-hidden;
+}
+
+.metric-bar-fill {
+    @apply h-full rounded-full transition-all duration-500;
+}
+
+.metric-bar-fill-before {
+    @apply bg-red-400;
+}
+
+.metric-bar-fill-after {
+    @apply bg-emerald-500;
+}
+
+.server-grid {
+    @apply grid grid-cols-3 gap-3;
+}
+
+.server-card {
+    @apply rounded-lg border p-3 text-center text-sm;
+}
+
+.server-card-healthy {
+    @apply border-emerald-300 bg-emerald-50;
+}
+
+.server-card-unhealthy {
+    @apply border-red-300 bg-red-50 opacity-60;
+}
+
+.compare-card {
+    @apply rounded-xl border-2 p-4 flex flex-col gap-3;
+}
+
+.compare-card-before {
+    @apply border-red-200 bg-red-50/50;
+}
+
+.compare-card-after {
+    @apply border-emerald-200 bg-emerald-50/50;
+}
+
+.highlight-badge {
+    @apply inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-white border border-slate-200;
+}
+
+.prose-demo {
+    @apply text-sm text-slate-600 leading-relaxed;
+}

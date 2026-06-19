@@ -4,6 +4,7 @@ namespace App\Services\DailySalesTally;
 
 use App\Jobs\FinalizeDailySalesTallyJob;
 use App\Jobs\ProcessDailySalesChunkJob;
+use App\Models\DailySalesSummary;
 use App\Models\Order;
 use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
@@ -20,6 +21,8 @@ class DailySalesTallyBatchOrchestrator
      */
     public function start(string $saleDate): array
     {
+        DailySalesSummary::query()->whereDate('sale_date', $saleDate)->delete();
+
         $chunkJobs = $this->buildChunkJobs($saleDate);
         $expectedChunks = count($chunkJobs);
 

@@ -6,6 +6,8 @@ use App\Jobs\Middleware\LimitConcurrentTallyChunks;
 use App\Jobs\Middleware\MeasureJobPerformance;
 use App\Models\DailySalesTallyChunk;
 use App\Models\Order;
+use App\Services\DailySalesTally\TallyChunkProgressTracker;
+use App\Services\DailySalesTally\TallyWorkerRegistry;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -48,25 +50,42 @@ class ProcessDailySalesChunkJob implements ShouldQueue
             return;
         }
 
-        $rows = Order::query()
-            ->whereIn('id', $this->orderIds)
-            ->whereDate('created_at', $this->saleDate)
-            ->where('status', 'success')
-            ->get(['quantity']);
+        $batchId = (string) $this->batch()->id;
+        $workerPid = (int) (getmypid() ?: 0);
+        $workerTerminal = TallyWorkerRegistry::terminalForProcess($batchId, $workerPid);
 
-        $orderCount = $rows->count();
-        $totalQuantity = (int) $rows->sum('quantity');
+        TallyChunkProgressTracker::markRunning($batchId, $this->chunkIndex, $workerPid, $workerTerminal);
 
-        DailySalesTallyChunk::query()->updateOrCreate(
-            [
-                'batch_id' => (string) $this->batch()->id,
-                'chunk_index' => $this->chunkIndex,
-            ],
-            [
-                'sale_date' => $this->saleDate,
-                'order_count' => $orderCount,
-                'total_quantity' => $totalQuantity,
-            ]
-        );
+        $delaySeconds = (float) config('daily_sales_tally.demo_chunk_delay_seconds', 0);
+        if ($delaySeconds > 0) {
+            usleep((int) round($delaySeconds * 1_000_000));
+        }
+
+        try {
+            $rows = Order::query()
+                ->whereIn('id', $this->orderIds)
+                ->whereDate('created_at', $this->saleDate)
+                ->where('status', 'success')
+                ->get(['quantity']);
+
+            $orderCount = $rows->count();
+            $totalQuantity = (int) $rows->sum('quantity');
+
+            DailySalesTallyChunk::query()->updateOrCreate(
+                [
+                    'batch_id' => $batchId,
+                    'chunk_index' => $this->chunkIndex,
+                ],
+                [
+                    'sale_date' => $this->saleDate,
+                    'order_count' => $orderCount,
+                    'total_quantity' => $totalQuantity,
+                    'worker_pid' => $workerPid > 0 ? $workerPid : null,
+                    'worker_terminal' => $workerTerminal > 0 ? $workerTerminal : null,
+                ]
+            );
+        } finally {
+            TallyChunkProgressTracker::clearRunning($batchId, $this->chunkIndex);
+        }
     }
 }

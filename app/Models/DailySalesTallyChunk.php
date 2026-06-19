@@ -12,6 +12,8 @@ class DailySalesTallyChunk extends Model
         'chunk_index',
         'order_count',
         'total_quantity',
+        'worker_pid',
+        'worker_terminal',
     ];
 
     protected function casts(): array
