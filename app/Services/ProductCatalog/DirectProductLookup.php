@@ -16,11 +16,13 @@ class DirectProductLookup
      */
     public function find(int $productId): array
     {
-        $this->metrics->dbQueries++;
+        $this->metrics->incrementDbQueries();
 
         $product = Product::query()->find($productId);
 
         if (! $product) {
+            $this->metrics->recordLookup($productId, 'direct', null, 1, 'direct_db');
+
             return [
                 'found' => false,
                 'product' => null,
@@ -29,6 +31,8 @@ class DirectProductLookup
                 'cache_result' => null,
             ];
         }
+
+        $this->metrics->recordLookup($productId, 'direct', null, 1, 'direct_db');
 
         return [
             'found' => true,

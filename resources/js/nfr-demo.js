@@ -128,16 +128,20 @@ export function explainResponse(taskId, side, result, lang = 'en') {
         },
         6: {
             before: {
-                en: `Direct DB lookup: ${body.db_queries ?? '?'} queries. No cache.`,
-                ar: `استعلام مباشر: ${body.db_queries ?? '?'} استعلام. بدون كاش.`,
+                en: `Direct DB lookup — ${body.db_queries ?? '?'} query, lookup_mode: ${body.lookup_mode ?? 'direct_db'}. No Redis.`,
+                ar: `استعلام DB مباشر — ${body.db_queries ?? '?'} استعلام. بدون Redis.`,
             },
             after: {
                 en: body.cache_result === 'hit'
-                    ? 'Cache HIT — served from Redis, minimal DB work.'
-                    : 'Cache MISS — loaded from DB and stored in Redis.',
+                    ? `Cache HIT — Redis served product, db_queries: 0, lookup_mode: ${body.lookup_mode ?? 'cache_aside'}.`
+                    : body.cache_result === 'bypass'
+                        ? `Redis bypass — fell back to DB (${body.db_queries ?? '?'} queries). Check PRODUCT_CACHE_STORE=redis.`
+                        : `Cache MISS — loaded from DB (${body.db_queries ?? '?'} query), stored in Redis for next request.`,
                 ar: body.cache_result === 'hit'
-                    ? 'إصابة كاش — من Redis.'
-                    : 'فوت كاش — من DB ثم تخزين في Redis.',
+                    ? 'إصابة كاش — من Redis، db_queries: 0.'
+                    : body.cache_result === 'bypass'
+                        ? 'تجاوز Redis — رجوع إلى DB. تحقق من Redis.'
+                        : `فوت كاش — من DB (${body.db_queries ?? '?'} استعلام) ثم تخزين في Redis.`,
             },
         },
         7: {
@@ -263,6 +267,11 @@ export function nfrDemo(tasks) {
             phase: '',
             multiPortLog: [],
             multiPortError: null,
+        },
+        cacheScenario: {
+            stats: null,
+            loading: false,
+            phase: '',
         },
 
         init() {
@@ -516,17 +525,101 @@ export function nfrDemo(tasks) {
         async runCachedTwice(taskId) {
             await this.runSide(taskId, 'after');
             await this.runSide(taskId, 'after');
-            await this.fetchStats('/api/cache/stats', 'cache');
+            await this.fetchCacheStatus();
+        },
+
+        cacheRequestDelayMs() {
+            return this.cacheScenario.stats?.demo_request_delay_ms ?? 400;
+        },
+
+        async cacheSleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.cacheRequestDelayMs());
+            });
+        },
+
+        async fetchCacheStatus() {
+            const params = new URLSearchParams({ product_id: String(this.productId) });
+            const r = await callApi({ method: 'GET', path: `/api/cache/stats?${params.toString()}` });
+            if (r.ok && r.body) {
+                this.cacheScenario.stats = r.body;
+                this.stats.cache = r.body;
+            }
+
+            return r;
+        },
+
+        async resetCacheDemo() {
+            await callApi({ method: 'POST', path: '/api/cache/reset' });
+            this.cacheScenario.phase = '';
+            this.stats.cache = null;
+            await this.fetchCacheStatus();
+        },
+
+        async runCacheLookup(path) {
+            await callApi({ method: 'GET', path });
+            await this.fetchCacheStatus();
+            await this.cacheSleep();
+        },
+
+        async runCacheFullScenario(taskId) {
+            this.cacheScenario.loading = true;
+
+            try {
+                await this.resetCacheDemo();
+
+                const productId = this.productId;
+                const directPath = `/api/products/${productId}/direct`;
+                const cachedPath = `/api/products/${productId}/cached`;
+
+                this.cacheScenario.phase = this.t(
+                    'Phase 1: 5× direct (always DB)',
+                    'المرحلة 1: 5× direct (DB دائماً)',
+                );
+                for (let i = 0; i < 5; i++) {
+                    await this.runCacheLookup(directPath);
+                }
+
+                this.cacheScenario.phase = this.t(
+                    'Phase 2: 2× cached (miss → hit)',
+                    'المرحلة 2: 2× cached (miss → hit)',
+                );
+                await this.runCacheLookup(cachedPath);
+                await this.runCacheLookup(cachedPath);
+
+                this.cacheScenario.phase = this.t(
+                    'Phase 3: purchase (invalidates cache)',
+                    'المرحلة 3: شراء (إبطال الكاش)',
+                );
+                await callApi({
+                    method: 'POST',
+                    path: '/api/buy-with-lock',
+                    body: { product_id: productId, quantity: 1 },
+                });
+                await this.fetchCacheStatus();
+                await this.cacheSleep();
+
+                this.cacheScenario.phase = this.t(
+                    'Phase 4: 1× cached (miss after invalidation)',
+                    'المرحلة 4: cached miss بعد الإبطال',
+                );
+                await this.runCacheLookup(cachedPath);
+
+                this.cacheScenario.phase = this.t('Done', 'اكتمل');
+                await this.runSide(taskId, 'before');
+                await this.runSide(taskId, 'after');
+            } finally {
+                this.cacheScenario.loading = false;
+            }
         },
 
         async warmCache() {
             await callApi({ method: 'POST', path: '/api/cache/warm-popular' });
-            await this.fetchStats('/api/cache/stats', 'cache');
+            await this.fetchCacheStatus();
         },
 
         async resetCache() {
-            await callApi({ method: 'POST', path: '/api/cache/reset' });
-            this.stats.cache = null;
+            await this.resetCacheDemo();
         },
 
         async pollSummary(taskId) {

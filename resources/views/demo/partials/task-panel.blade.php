@@ -178,33 +178,9 @@
         @include('demo.partials.load-scenario', ['taskId' => $taskId])
     @endif
 
-    {{-- Task 6: cache --}}
-    @if(!empty($task['cache_stats']))
-        <div class="mt-4 flex flex-wrap gap-2">
-            <button type="button" @click="runCachedTwice(@json($taskId))"
-                class="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm"
-                x-text="t('Run cached ×2 (hit demo)', 'كاش مرتين')">
-            </button>
-            <button type="button" @click="warmCache()" class="rounded-lg border px-4 py-2 text-sm" x-text="t('Warm cache', 'تسخين')"></button>
-            <button type="button" @click="resetCache()" class="rounded-lg border px-4 py-2 text-sm" x-text="t('Reset cache', 'إعادة')"></button>
-            <button type="button" @click="fetchStats('/api/cache/stats', 'cache')" class="rounded-lg border px-4 py-2 text-sm" x-text="t('Stats', 'إحصائيات')"></button>
-        </div>
-        <template x-if="stats.cache?.metrics">
-            <div class="mt-3 grid grid-cols-3 gap-3 text-sm">
-                <div class="rounded border bg-white p-3">
-                    <div class="text-slate-500" x-text="t('Hits', 'إصابات')"></div>
-                    <div class="text-xl font-bold text-emerald-600" x-text="stats.cache.metrics.cache_hits ?? 0"></div>
-                </div>
-                <div class="rounded border bg-white p-3">
-                    <div class="text-slate-500" x-text="t('Misses', 'إخفاقات')"></div>
-                    <div class="text-xl font-bold text-amber-600" x-text="stats.cache.metrics.cache_misses ?? 0"></div>
-                </div>
-                <div class="rounded border bg-white p-3">
-                    <div class="text-slate-500" x-text="t('Hit rate %', 'نسبة الإصابة')"></div>
-                    <div class="text-xl font-bold" x-text="(stats.cache.metrics.hit_rate_percent ?? 0) + '%'"></div>
-                </div>
-            </div>
-        </template>
+    {{-- Task 6: cache scenario --}}
+    @if(!empty($task['cache_scenario']))
+        @include('demo.partials.cache-scenario', ['taskId' => $taskId])
     @endif
 
     {{-- Task 7: concurrency stats --}}

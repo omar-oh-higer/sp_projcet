@@ -132,7 +132,7 @@ return [
                 'path' => '/api/products/{productId}/cached',
             ],
             'highlights' => ['lookup_mode', 'db_queries', 'cache_result'],
-            'cache_stats' => true,
+            'cache_scenario' => true,
         ],
 
         7 => [

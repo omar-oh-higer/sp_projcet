@@ -6,7 +6,9 @@ use App\Services\ProductCatalog\CachedProductLookup;
 use App\Services\ProductCatalog\DirectProductLookup;
 use App\Services\ProductCatalog\ProductCacheInvalidator;
 use App\Services\ProductCatalog\ProductCatalogMetrics;
+use App\Services\ProductCatalog\ProductCatalogStatusBuilder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /** Task 6: direct DB product lookup vs Redis Cache-Aside demo. */
 class ProductCatalogController extends Controller
@@ -56,15 +58,23 @@ class ProductCatalogController extends Controller
         ]);
     }
 
-    public function cacheStats(ProductCatalogMetrics $metrics): JsonResponse
-    {
-        return response()->json([
+    public function cacheStats(
+        ProductCatalogMetrics $metrics,
+        ProductCatalogStatusBuilder $statusBuilder,
+        Request $request,
+    ): JsonResponse {
+        $storeName = (string) config('product_cache.store', 'redis');
+        $exampleProductId = $request->integer('product_id') ?: null;
+        $enriched = $statusBuilder->build($metrics, $exampleProductId);
+
+        return response()->json(array_merge([
             'message' => 'Product catalog cache statistics (Session 6 demo).',
             'pattern' => 'cache_aside',
-            'metrics' => $metrics->snapshot((string) config('product_cache.store', 'redis')),
+            'metrics' => $metrics->snapshot($storeName),
             'popular_product_ids' => config('product_cache.popular_product_ids', []),
             'ttl_seconds' => config('product_cache.ttl_seconds', 300),
-        ]);
+            'demo_request_delay_ms' => (int) config('product_cache.demo_request_delay_ms', 400),
+        ], $enriched));
     }
 
     public function cacheReset(

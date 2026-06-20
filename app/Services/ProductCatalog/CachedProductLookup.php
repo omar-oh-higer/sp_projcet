@@ -27,7 +27,8 @@ class CachedProductLookup
             $cached = $store->get($key);
 
             if ($cached !== null && is_array($cached)) {
-                $this->metrics->cacheHits++;
+                $this->metrics->incrementCacheHits();
+                $this->metrics->recordLookup($productId, 'cached', 'hit', 0, 'cache_aside');
 
                 return [
                     'found' => true,
@@ -38,12 +39,14 @@ class CachedProductLookup
                 ];
             }
 
-            $this->metrics->cacheMisses++;
-            $this->metrics->dbQueries++;
+            $this->metrics->incrementCacheMisses();
+            $this->metrics->incrementDbQueries();
 
             $product = Product::query()->find($productId);
 
             if (! $product) {
+                $this->metrics->recordLookup($productId, 'cached', 'miss', 1, 'cache_aside');
+
                 return [
                     'found' => false,
                     'product' => null,
@@ -61,6 +64,7 @@ class CachedProductLookup
             ];
 
             $store->put($key, $payload, config('product_cache.ttl_seconds', 300));
+            $this->metrics->recordLookup($productId, 'cached', 'miss', 1, 'cache_aside');
 
             return [
                 'found' => true,
@@ -70,12 +74,14 @@ class CachedProductLookup
                 'cache_result' => 'miss',
             ];
         } catch (Throwable) {
-            $this->metrics->cacheBypasses++;
-            $this->metrics->dbQueries++;
+            $this->metrics->incrementCacheBypasses();
+            $this->metrics->incrementDbQueries();
 
             $product = Product::query()->find($productId);
 
             if (! $product) {
+                $this->metrics->recordLookup($productId, 'cached', 'bypass', 1, 'cache_aside');
+
                 return [
                     'found' => false,
                     'product' => null,
@@ -84,6 +90,8 @@ class CachedProductLookup
                     'cache_result' => 'bypass',
                 ];
             }
+
+            $this->metrics->recordLookup($productId, 'cached', 'bypass', 1, 'cache_aside');
 
             return [
                 'found' => true,

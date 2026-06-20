@@ -23,4 +23,14 @@ return [
         array_filter(explode(',', env('PRODUCT_CACHE_POPULAR_IDS', '1,2,3')))
     ),
 
+    'demo_request_delay_ms' => (int) env('PRODUCT_CACHE_DEMO_DELAY_MS', 400),
+
+    /*
+    | Demo metrics (hits/misses/lookup log) — uses default CACHE_STORE so stats
+    | survive separate HTTP requests during /demo scenario (not in-memory).
+    */
+    'metrics_cache_key' => env('PRODUCT_CACHE_METRICS_KEY', 'product_catalog:demo_metrics'),
+
+    'metrics_store' => env('PRODUCT_CACHE_METRICS_STORE'),
+
 ];
