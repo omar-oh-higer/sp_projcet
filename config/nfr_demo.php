@@ -110,7 +110,7 @@ return [
                 'path' => '/api/load/route-balanced',
             ],
             'highlights' => ['target_server', 'distribution_mode', 'scaling_model', 'node_port'],
-            'distribution_stats' => true,
+            'load_scenario' => true,
             'multi_port' => true,
         ],
 

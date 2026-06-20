@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\SetServerHealthRequest;
+use App\Services\LoadBalancing\BackendPool;
 use App\Services\LoadBalancing\BackendHealthRegistry;
 use App\Services\LoadBalancing\LoadDistributionRecorder;
+use App\Services\LoadBalancing\LoadDistributionStatusBuilder;
 use App\Services\LoadBalancing\MultiServerProcessGateway;
 use App\Services\LoadBalancing\NodeIdentity;
 use App\Services\LoadBalancing\RoundRobinLoadBalancer;
@@ -22,14 +24,17 @@ class LoadDistributionController extends Controller
     public function routeSingle(
         SingleServerRouter $router,
         LoadDistributionRecorder $recorder,
+        BackendPool $backendPool,
     ): JsonResponse {
         $target = $router->target();
-        $recorder->record($target, 'single');
+        $port = $backendPool->find($target)['port'];
+        $recorder->record($target, 'single', null, $port);
 
         return response()->json([
             'message' => 'Request routed to single server (no load balancing).',
             'distribution_mode' => 'single',
             'target_server' => $target,
+            'target_port' => $port,
             'scaling_model' => 'vertical',
         ]);
     }
@@ -41,6 +46,7 @@ class LoadDistributionController extends Controller
     public function routeBalanced(
         RoundRobinLoadBalancer $balancer,
         LoadDistributionRecorder $recorder,
+        BackendPool $backendPool,
     ): JsonResponse {
         try {
             $target = $balancer->nextBackend();
@@ -50,13 +56,15 @@ class LoadDistributionController extends Controller
             ], 503);
         }
 
-        $recorder->record($target, 'round_robin');
+        $port = $backendPool->find($target)['port'];
+        $recorder->record($target, 'round_robin', null, $port);
 
         return response()->json([
             'message' => 'Request routed via Round Robin load balancer.',
             'distribution_mode' => 'round_robin',
             'strategy' => 'round_robin',
             'target_server' => $target,
+            'target_port' => $port,
             'scaling_model' => 'horizontal',
         ]);
     }
@@ -65,8 +73,14 @@ class LoadDistributionController extends Controller
     public function stats(
         LoadDistributionRecorder $recorder,
         BackendHealthRegistry $healthRegistry,
+        LoadDistributionStatusBuilder $statusBuilder,
     ): JsonResponse {
-        return response()->json($recorder->stats($healthRegistry));
+        $base = $recorder->stats($healthRegistry);
+        $enriched = $statusBuilder->build($base, $healthRegistry);
+
+        return response()->json(array_merge($base, $enriched, [
+            'demo_request_delay_ms' => (int) config('load_balancing.demo_request_delay_ms', 300),
+        ]));
     }
 
     /** Demo: mark a backend healthy/unhealthy (lecture Server B removed from rotation). */

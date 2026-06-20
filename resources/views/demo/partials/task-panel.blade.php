@@ -173,44 +173,9 @@
         @include('demo.partials.tally-scenario', ['taskId' => $taskId])
     @endif
 
-    {{-- Task 5: distribution --}}
-    @if(!empty($task['distribution_stats']))
-        <div class="mt-4 space-y-3">
-            <div class="flex flex-wrap gap-2">
-                <button type="button" @click="runDistributionDemo(@json($taskId), 12)"
-                    class="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm hover:bg-indigo-700"
-                    x-text="t('Run ×12 routes + load stats', '12 توجيه + إحصائيات')">
-                </button>
-                <button type="button" @click="fetchStats('/api/load/distribution-stats', 'distribution')"
-                    class="rounded-lg border px-4 py-2 text-sm hover:bg-slate-100"
-                    x-text="t('Refresh stats', 'تحديث')">
-                </button>
-            </div>
-            <template x-if="stats.distribution?.by_server">
-                <div class="space-y-2">
-                    <template x-for="(hits, server) in stats.distribution.by_server" :key="server">
-                        <div>
-                            <div class="flex justify-between text-xs mb-1">
-                                <span x-text="server"></span>
-                                <span x-text="hits"></span>
-                            </div>
-                            <div class="metric-bar-track">
-                                <div class="metric-bar-fill bg-indigo-500" :style="'width:' + barWidth(hits, maxBar(stats.distribution.by_server))"></div>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-            </template>
-            <div class="server-grid">
-                <template x-for="srv in ['server-1','server-2','server-3']" :key="srv">
-                    <div class="server-card" :class="stats.distribution?.backend_health?.[srv] !== false ? 'server-card-healthy' : 'server-card-unhealthy'">
-                        <div class="font-mono text-xs" x-text="srv"></div>
-                        <button type="button" @click="setServerHealth(srv, false)" class="mt-2 text-xs text-red-600 underline" x-text="t('Unhealthy', 'معطّل')"></button>
-                        <button type="button" @click="setServerHealth(srv, true)" class="mt-1 text-xs text-emerald-600 underline" x-text="t('Healthy', 'سليم')"></button>
-                    </div>
-                </template>
-            </div>
-        </div>
+    {{-- Task 5: load distribution scenario --}}
+    @if(!empty($task['load_scenario']))
+        @include('demo.partials.load-scenario', ['taskId' => $taskId])
     @endif
 
     {{-- Task 6: cache --}}

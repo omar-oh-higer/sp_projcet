@@ -14,8 +14,15 @@ class LoadDistributionRecorder
             'target_server' => $targetServer,
             'target_port' => $targetPort,
             'distribution_mode' => $distributionMode,
-            'request_index' => $requestIndex,
+            'request_index' => $requestIndex ?? $this->nextRequestIndex(),
         ]);
+    }
+
+    public function nextRequestIndex(): int
+    {
+        $max = LoadDistributionHit::query()->max('request_index');
+
+        return $max !== null ? ((int) $max) + 1 : 1;
     }
 
     /**

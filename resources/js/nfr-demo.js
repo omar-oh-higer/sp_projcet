@@ -110,12 +110,20 @@ export function explainResponse(taskId, side, result, lang = 'en') {
         },
         5: {
             before: {
-                en: `Routed to ${body.target_server} (single server, vertical scaling).`,
-                ar: `توجيه إلى ${body.target_server} (خادم واحد، توسع عمودي).`,
+                en: body.handled_by
+                    ? `Gateway single → ${body.handled_by} (port ${body.target_port ?? '—'}, vertical).`
+                    : `Pinned to ${body.target_server} — scaling_model: ${body.scaling_model ?? 'vertical'}. All spike traffic on one server.`,
+                ar: body.handled_by
+                    ? `Gateway single → ${body.handled_by} (منفذ ${body.target_port ?? '—'}).`
+                    : `توجيه إلى ${body.target_server} — توسع عمودي. كل الحركة على خادم واحد.`,
             },
             after: {
-                en: `Round Robin → ${body.target_server} (horizontal scaling).`,
-                ar: `Round Robin → ${body.target_server} (توسع أفقي).`,
+                en: body.handled_by
+                    ? `Gateway Round Robin → ${body.handled_by} (port ${body.target_port ?? '—'}).`
+                    : `Round Robin → ${body.target_server} (${body.strategy ?? 'round_robin'}, ${body.scaling_model ?? 'horizontal'}).`,
+                ar: body.handled_by
+                    ? `Gateway Round Robin → ${body.handled_by}.`
+                    : `Round Robin → ${body.target_server} (توسع أفقي).`,
             },
         },
         6: {
@@ -248,6 +256,14 @@ export function nfrDemo(tasks) {
             refreshError: null,
             lastRefreshedAt: null,
         },
+        loadScenario: {
+            stats: null,
+            loading: false,
+            loadingMultiPort: false,
+            phase: '',
+            multiPortLog: [],
+            multiPortError: null,
+        },
 
         init() {
             const hash = window.location.hash.replace('#task-', '');
@@ -368,17 +384,124 @@ export function nfrDemo(tasks) {
             this.stats[key] = r.body;
         },
 
-        async runDistributionDemo(taskId, times = 12) {
-            const task = tasks[taskId];
-            await callApi({ method: 'POST', path: '/api/load/distribution-reset' });
-            for (let i = 0; i < times; i++) {
-                const ep = i % 2 === 0 ? task.before : task.after;
-                await callApi({
-                    method: ep.method,
-                    path: resolvePath(ep.path, this.vars()),
-                });
+        async fetchLoadStatus() {
+            const r = await callApi({ method: 'GET', path: '/api/load/distribution-stats' });
+            if (r.ok && r.body) {
+                this.loadScenario.stats = r.body;
+                this.stats.distribution = r.body;
             }
-            await this.fetchStats('/api/load/distribution-stats', 'distribution');
+
+            return r;
+        },
+
+        loadRequestDelayMs() {
+            return this.loadScenario.stats?.demo_request_delay_ms ?? 300;
+        },
+
+        async loadSleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.loadRequestDelayMs());
+            });
+        },
+
+        async resetLoadDemo() {
+            await callApi({ method: 'POST', path: '/api/load/distribution-reset' });
+            this.loadScenario.phase = '';
+            this.loadScenario.multiPortLog = [];
+            this.loadScenario.multiPortError = null;
+            await this.fetchLoadStatus();
+        },
+
+        async runLoadRoutes(path, count) {
+            for (let i = 0; i < count; i++) {
+                await callApi({ method: 'POST', path });
+                await this.fetchLoadStatus();
+                await this.loadSleep();
+            }
+        },
+
+        async runLoadFullScenario(taskId) {
+            this.loadScenario.loading = true;
+            this.loadScenario.multiPortError = null;
+
+            try {
+                await this.resetLoadDemo();
+
+                this.loadScenario.phase = this.t(
+                    'Phase 1: 9× vertical (single)',
+                    'المرحلة 1: 9× single عمودي',
+                );
+                await this.runLoadRoutes('/api/load/route-single', 9);
+
+                this.loadScenario.phase = this.t(
+                    'Phase 2: 9× horizontal (Round Robin)',
+                    'المرحلة 2: 9× balanced أفقي',
+                );
+                await this.runLoadRoutes('/api/load/route-balanced', 9);
+
+                this.loadScenario.phase = this.t(
+                    'Phase 3: server-2 down + 6× balanced',
+                    'المرحلة 3: server-2 معطّل + 6× balanced',
+                );
+                await this.setServerHealth('server-2', false);
+                await this.runLoadRoutes('/api/load/route-balanced', 6);
+
+                this.loadScenario.phase = this.t('Done', 'اكتمل');
+                await this.runSide(taskId, 'before');
+                await this.runSide(taskId, 'after');
+            } finally {
+                this.loadScenario.loading = false;
+            }
+        },
+
+        async runLoadMultiPortScenario(mode, count = 9) {
+            this.loadScenario.loadingMultiPort = true;
+            this.loadScenario.multiPortError = null;
+            this.loadScenario.multiPortLog = [];
+
+            const path = mode === 'single'
+                ? '/api/load/process-single'
+                : '/api/load/process-balanced';
+
+            try {
+                await callApi({ method: 'POST', path: '/api/load/distribution-reset' });
+
+                for (let task = 1; task <= count; task++) {
+                    const r = await callApi({
+                        method: 'POST',
+                        path,
+                        body: { task_number: task },
+                    });
+
+                    if (!r.ok || r.body?.error) {
+                        const hint = typeof r.body === 'object' && (r.body?.hint_en || r.body?.hint_ar)
+                            ? (this.lang === 'ar' ? r.body.hint_ar : r.body.hint_en)
+                            : null;
+                        this.loadScenario.multiPortError = hint
+                            ?? (typeof r.body === 'object' && r.body?.detail
+                                ? r.body.detail
+                                : (typeof r.body === 'object' && r.body?.message
+                                    ? r.body.message
+                                    : this.t(
+                                        'Cannot reach worker nodes. Run .\\scripts\\start-multi-server.ps1',
+                                        'تعذر الوصول للـ nodes — شغّل start-multi-server.ps1',
+                                    )));
+                        break;
+                    }
+
+                    this.loadScenario.multiPortLog.push({
+                        task_number: task,
+                        mode,
+                        target_port: r.body?.target_port ?? r.body?.worker_response?.node_port,
+                        handled_by: r.body?.handled_by ?? r.body?.worker_response?.handled_by,
+                    });
+
+                    await this.fetchLoadStatus();
+                    await this.loadSleep();
+                }
+            } finally {
+                this.loadScenario.loadingMultiPort = false;
+            }
         },
 
         async setServerHealth(server, healthy) {
@@ -387,7 +510,7 @@ export function nfrDemo(tasks) {
                 path: '/api/load/set-server-health',
                 body: { server, healthy },
             });
-            await this.fetchStats('/api/load/distribution-stats', 'distribution');
+            await this.fetchLoadStatus();
         },
 
         async runCachedTwice(taskId) {
@@ -607,6 +730,14 @@ export function nfrDemo(tasks) {
 
         maxBar(values) {
             return Math.max(...Object.values(values).map(Number), 1);
+        },
+
+        maxServerHits(servers) {
+            if (!servers?.length) {
+                return 1;
+            }
+
+            return Math.max(...servers.map((s) => s.hits ?? 0), 1);
         },
     };
 }

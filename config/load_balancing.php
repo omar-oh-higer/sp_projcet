@@ -43,6 +43,9 @@ return [
     /** HTTP timeout when forwarding to worker nodes (seconds). */
     'http_timeout' => (int) env('LOAD_HTTP_TIMEOUT', 5),
 
+    /** Delay between demo UI requests so rotation is visible (milliseconds). */
+    'demo_request_delay_ms' => (int) env('LOAD_DEMO_REQUEST_DELAY_MS', 300),
+
     /** Before path: vertical scaling — all traffic pinned here (no balancer). */
     'single_target' => 'server-1',
 

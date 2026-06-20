@@ -83,6 +83,9 @@
                                     @if(!empty($task['prerequisites']['restart_queue']))
                                         <li x-text="t('After code changes: Ctrl+C ALL queue:work windows, then start them again', 'بعد تحديث الكود: أوقف كل queue:work ثم شغّلها من جديد')"></li>
                                     @endif
+                                    @if(!empty($task['prerequisites']['multi_server_optional']))
+                                        <li x-text="t('Optional: .\\scripts\\start-multi-server.ps1 + CACHE_STORE=database for real HTTP nodes', 'اختياري: multi-server + CACHE_STORE=database')"></li>
+                                    @endif
                                     @if(!empty($task['prerequisites']['redis']))
                                         <li x-text="t('Redis running + PRODUCT_CACHE_STORE=redis or INVENTORY_LOCK_STORE=redis', 'Redis + إعدادات env المناسبة')"></li>
                                     @endif

@@ -30,13 +30,19 @@ class RoundRobinLoadBalancer
         }
 
         $key = config('load_balancing.cache_keys.round_robin_index', 'load_balancer:rr_index');
-        $index = (int) Cache::increment($key);
+        $index = Cache::increment($key);
 
-        if ($index === 1) {
+        // increment() returns false when the key is missing (common with database cache).
+        if ($index === false || (int) $index < 1) {
+            Cache::put($key, 1, 3600);
+            $index = 1;
+        } elseif ((int) $index === 1) {
             Cache::put($key, 1, 3600);
         }
 
-        $position = ($index - 1) % count($pool);
+        $index = (int) $index;
+        $poolSize = count($pool);
+        $position = (($index - 1) % $poolSize + $poolSize) % $poolSize;
 
         return $pool[$position];
     }
