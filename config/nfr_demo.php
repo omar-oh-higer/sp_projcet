@@ -155,7 +155,7 @@ return [
                 'body' => ['product_id' => '{productId}', 'quantity' => '{quantity}'],
             ],
             'highlights' => ['concurrency_strategy', 'conflict', 'lock_acquired', 'version', 'stock'],
-            'concurrency_stats' => true,
+            'concurrency_scenario' => true,
         ],
 
         8 => [

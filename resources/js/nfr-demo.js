@@ -147,19 +147,19 @@ export function explainResponse(taskId, side, result, lang = 'en') {
         7: {
             before: {
                 en: body.conflict
-                    ? 'Optimistic version conflict — another process updated stock first.'
-                    : `Optimistic purchase OK. Version: ${body.version ?? '—'}.`,
+                    ? `Optimistic version conflict (409) — stock=${body.stock ?? '?'}, version=${body.version ?? '?'}. Another request won the race.`
+                    : `Optimistic purchase OK — stock=${body.stock ?? '?'}, version=${body.version ?? '?'}. Under parallel load, expect conflicts.`,
                 ar: body.conflict
-                    ? 'تعارض إصدار تفاؤلي — عملية أخرى حدّثت المخزون أولاً.'
-                    : `شراء تفاؤلي ناجح. الإصدار: ${body.version ?? '—'}.`,
+                    ? `تعارض إصدار (409) — مخزون=${body.stock ?? '?'}.`
+                    : `شراء تفاؤلي OK — إصدار ${body.version ?? '?'}.`,
             },
             after: {
-                en: body.lock_acquired
-                    ? 'Redis distributed lock acquired, then pessimistic DB purchase.'
-                    : 'Could not acquire distributed lock in time (503).',
-                ar: body.lock_acquired
-                    ? 'قفل Redis موزع، ثم شراء DB تشاؤمي.'
-                    : 'تعذر الحصول على القفل في الوقت (503).',
+                en: body.lock_acquired === false
+                    ? 'Distributed lock timeout (503) — Redis busy or unreachable. Check INVENTORY_LOCK_STORE=redis.'
+                    : `Distributed lock acquired + purchase OK — stock=${body.stock ?? '?'}, strategy: ${body.concurrency_strategy ?? 'distributed_pessimistic'}.`,
+                ar: body.lock_acquired === false
+                    ? 'انتهت مهلة قفل Redis (503).'
+                    : `قفل Redis + شراء OK — مخزون ${body.stock ?? '?'}.`,
             },
         },
         8: {
@@ -269,6 +269,11 @@ export function nfrDemo(tasks) {
             multiPortError: null,
         },
         cacheScenario: {
+            stats: null,
+            loading: false,
+            phase: '',
+        },
+        concurrencyScenario: {
             stats: null,
             loading: false,
             phase: '',
@@ -796,7 +801,108 @@ export function nfrDemo(tasks) {
         },
 
         async loadConcurrencyStats() {
-            await this.fetchStats('/api/concurrency/stats', 'concurrency');
+            await this.fetchConcurrencyStatus();
+        },
+
+        concurrencyRequestDelayMs() {
+            return this.concurrencyScenario.stats?.demo_request_delay_ms ?? 400;
+        },
+
+        async concurrencySleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.concurrencyRequestDelayMs());
+            });
+        },
+
+        async fetchConcurrencyStatus() {
+            const params = new URLSearchParams({ product_id: String(this.productId) });
+            const r = await callApi({ method: 'GET', path: `/api/concurrency/stats?${params.toString()}` });
+            if (r.ok && r.body) {
+                this.concurrencyScenario.stats = r.body;
+                this.stats.concurrency = r.body;
+            }
+
+            return r;
+        },
+
+        async resetConcurrencyDemo(resetMetrics = true) {
+            await callApi({
+                method: 'POST',
+                path: '/api/concurrency/demo-reset',
+                body: { product_id: this.productId, reset_metrics: resetMetrics },
+            });
+            this.concurrencyScenario.phase = '';
+            await this.fetchConcurrencyStatus();
+        },
+
+        async restoreConcurrencyStock() {
+            await this.resetConcurrencyDemo(false);
+        },
+
+        async runOptimisticConflictBurst(count) {
+            const delayMs = this.concurrencyScenario.stats?.demo_optimistic_delay_ms ?? 50;
+
+            await callApi({
+                method: 'POST',
+                path: '/api/concurrency/demo-stress',
+                body: {
+                    product_id: this.productId,
+                    strategy: 'optimistic',
+                    requests: count,
+                    parallel_snapshot: true,
+                    delay_ms: delayMs,
+                },
+            });
+            await this.fetchConcurrencyStatus();
+        },
+
+        async runOptimisticParallelBurst(count) {
+            await this.runOptimisticConflictBurst(count);
+        },
+
+        async runConcurrencyFullScenario(taskId) {
+            this.concurrencyScenario.loading = true;
+
+            try {
+                await this.resetConcurrencyDemo();
+
+                const burstCount = this.concurrencyScenario.stats?.demo_burst_count ?? 10;
+
+                this.concurrencyScenario.phase = this.t(
+                    `Phase 1: ${burstCount}× optimistic (shared version → conflicts)`,
+                    `المرحلة 1: ${burstCount}× optimistic (تعارضات)`,
+                );
+                await this.runOptimisticConflictBurst(burstCount);
+                await this.concurrencySleep();
+
+                this.concurrencyScenario.phase = this.t(
+                    'Phase 2: restore stock (keep optimistic log)',
+                    'المرحلة 2: إعادة المخزون (الإبقاء على سجل التفاؤلي)',
+                );
+                await this.restoreConcurrencyStock();
+
+                this.concurrencyScenario.phase = this.t(
+                    `Phase 3: ${burstCount}× distributed stress (in-process)`,
+                    `المرحلة 3: ${burstCount}× distributed`,
+                );
+                await callApi({
+                    method: 'POST',
+                    path: '/api/concurrency/demo-stress',
+                    body: {
+                        product_id: this.productId,
+                        strategy: 'distributed',
+                        requests: burstCount,
+                    },
+                });
+                await this.fetchConcurrencyStatus();
+                await this.concurrencySleep();
+
+                this.concurrencyScenario.phase = this.t('Done', 'اكتمل');
+                await this.runSide(taskId, 'before');
+                await this.runSide(taskId, 'after');
+            } finally {
+                this.concurrencyScenario.loading = false;
+            }
         },
 
         statusClass(status) {

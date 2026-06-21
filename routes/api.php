@@ -24,6 +24,8 @@ Route::middleware('throttle:purchases')->group(function () {
     Route::post('/buy-optimistic', [InventoryConcurrencyController::class, 'buyOptimistic']);
     Route::get('/concurrency/stats', [InventoryConcurrencyController::class, 'stats']);
     Route::post('/concurrency/reset', [InventoryConcurrencyController::class, 'reset']);
+    Route::post('/concurrency/demo-reset', [InventoryConcurrencyController::class, 'demoReset']);
+    Route::post('/concurrency/demo-stress', [InventoryConcurrencyController::class, 'demoStress']);
 
     Route::post('/checkout/non-atomic', [CheckoutIntegrityController::class, 'checkoutNonAtomic']);
     Route::post('/checkout/acid', [CheckoutIntegrityController::class, 'checkoutAcid']);

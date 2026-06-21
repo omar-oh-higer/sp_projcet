@@ -24,6 +24,12 @@ class DistributedLockStockPurchaseService
         );
 
         if ($lockOutcome['status'] === 'timeout') {
+            $this->metrics->recordAttempt(
+                strategy: 'distributed',
+                outcome: 'lock_timeout',
+                productId: $productId,
+            );
+
             return [
                 'status' => 'lock_timeout',
                 'stock' => null,
@@ -37,8 +43,15 @@ class DistributedLockStockPurchaseService
         $purchase = $lockOutcome['result'];
 
         if ($purchase['status'] === 'success') {
-            $this->metrics->distributedSuccesses++;
+            $this->metrics->incrementDistributedSuccesses();
         }
+
+        $this->metrics->recordAttempt(
+            strategy: 'distributed',
+            outcome: $purchase['status'],
+            productId: $productId,
+            stockAfter: $purchase['stock'],
+        );
 
         return [
             'status' => $purchase['status'],

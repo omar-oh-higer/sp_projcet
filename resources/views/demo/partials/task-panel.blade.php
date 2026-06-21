@@ -183,17 +183,9 @@
         @include('demo.partials.cache-scenario', ['taskId' => $taskId])
     @endif
 
-    {{-- Task 7: concurrency stats --}}
-    @if(!empty($task['concurrency_stats']))
-        <div class="mt-4">
-            <button type="button" @click="loadConcurrencyStats()"
-                class="rounded-lg border px-4 py-2 text-sm hover:bg-slate-100"
-                x-text="t('Load concurrency stats', 'إحصائيات التزامن')">
-            </button>
-            <template x-if="stats.concurrency?.metrics">
-                <pre class="mt-2 text-xs p-3 bg-slate-100 rounded overflow-x-auto" x-text="JSON.stringify(stats.concurrency.metrics, null, 2)"></pre>
-            </template>
-        </div>
+    {{-- Task 7: concurrency scenario --}}
+    @if(!empty($task['concurrency_scenario']))
+        @include('demo.partials.concurrency-scenario', ['taskId' => $taskId])
     @endif
 
     {{-- Task 8: simulate headers --}}

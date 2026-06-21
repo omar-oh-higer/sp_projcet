@@ -33,7 +33,7 @@ class InventoryDistributedLock
             $lock = Cache::store($storeName)->lock($this->lockKey($productId), $ttl);
 
             $result = $lock->block($blockSeconds, function () use ($callback) {
-                $this->metrics->lockAcquired++;
+                $this->metrics->incrementLockAcquired();
 
                 return $callback();
             });
@@ -43,7 +43,7 @@ class InventoryDistributedLock
                 'result' => $result,
             ];
         } catch (LockTimeoutException) {
-            $this->metrics->lockTimeouts++;
+            $this->metrics->incrementLockTimeouts();
 
             return [
                 'status' => 'timeout',
