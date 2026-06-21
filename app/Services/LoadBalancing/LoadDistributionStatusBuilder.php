@@ -16,13 +16,20 @@ class LoadDistributionStatusBuilder
      *     backend_health: array<string, bool>,
      *     total_hits: int
      * }  $baseStats
+     * @param  list<array<string, mixed>>  $liveNodeHealth
      * @return array<string, mixed>
      */
-    public function build(array $baseStats, BackendHealthRegistry $healthRegistry): array
-    {
+    public function build(
+        array $baseStats,
+        BackendHealthRegistry $healthRegistry,
+        array $liveNodeHealth = [],
+        string $scenarioModeHint = 'simulated',
+    ): array {
         $totalHits = (int) ($baseStats['total_hits'] ?? 0);
         $byServer = $baseStats['by_server'] ?? [];
         $modeBreakdown = $baseStats['distribution_mode_breakdown'] ?? [];
+        $registryHealth = $baseStats['backend_health'] ?? [];
+        $liveReachable = $this->liveReachableMap($liveNodeHealth);
 
         $recentHits = LoadDistributionHit::query()
             ->orderByDesc('id')
@@ -54,7 +61,7 @@ class LoadDistributionStatusBuilder
             ->values()
             ->all();
 
-        $servers = $this->buildServers($byServer, $baseStats['backend_health'] ?? [], $totalHits);
+        $servers = $this->buildServers($byServer, $registryHealth, $liveReachable, $totalHits);
 
         $singleHits = (int) ($modeBreakdown['single'] ?? 0);
         $singleConcentration = null;
@@ -88,36 +95,90 @@ class LoadDistributionStatusBuilder
             'single_server_concentration' => $singleConcentration,
             'last_hit_server' => $lastHit?->target_server,
             'next_backend_hint' => $this->nextBackendHint($healthRegistry),
+            'live_node_health' => $liveNodeHealth,
+            'scenario_mode_hint' => $scenarioModeHint,
+            'health_mismatch' => $this->healthMismatch($registryHealth, $liveReachable),
             'refreshed_at' => now()->toIso8601String(),
         ];
     }
 
     /**
      * @param  array<string, int>  $byServer
-     * @param  array<string, bool>  $health
+     * @param  array<string, bool>  $registryHealth
+     * @param  array<string, bool>  $liveReachable
      * @return list<array<string, mixed>>
      */
-    private function buildServers(array $byServer, array $health, int $totalHits): array
-    {
+    private function buildServers(
+        array $byServer,
+        array $registryHealth,
+        array $liveReachable,
+        int $totalHits,
+    ): array {
         $pool = app(BackendPool::class);
         $servers = [];
 
         foreach ($pool->all() as $backend) {
             $id = $backend['id'];
             $hits = (int) ($byServer[$id] ?? 0);
-            $healthy = (bool) ($health[$id] ?? true);
+            $registryHealthy = (bool) ($registryHealth[$id] ?? true);
+            $live = array_key_exists($id, $liveReachable) ? (bool) $liveReachable[$id] : null;
 
             $servers[] = [
                 'id' => $id,
                 'port' => $backend['port'],
                 'label' => "{$id} :{$backend['port']}",
-                'healthy' => $healthy,
+                'healthy' => $registryHealthy,
+                'registry_healthy' => $registryHealthy,
+                'live_reachable' => $live,
                 'hits' => $hits,
                 'share_percent' => $totalHits > 0 ? round(($hits / $totalHits) * 100, 1) : 0,
             ];
         }
 
         return $servers;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $liveNodeHealth
+     * @return array<string, bool>
+     */
+    private function liveReachableMap(array $liveNodeHealth): array
+    {
+        $map = [];
+
+        foreach ($liveNodeHealth as $row) {
+            $map[(string) ($row['server_id'] ?? '')] = (bool) ($row['reachable'] ?? false);
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param  array<string, bool>  $registryHealth
+     * @param  array<string, bool>  $liveReachable
+     * @return list<array{server_id: string, registry_healthy: bool, live_reachable: bool}>
+     */
+    private function healthMismatch(array $registryHealth, array $liveReachable): array
+    {
+        $mismatches = [];
+
+        foreach ($registryHealth as $serverId => $registryHealthy) {
+            if (! array_key_exists($serverId, $liveReachable)) {
+                continue;
+            }
+
+            $live = $liveReachable[$serverId];
+
+            if ($registryHealthy !== $live) {
+                $mismatches[] = [
+                    'server_id' => $serverId,
+                    'registry_healthy' => $registryHealthy,
+                    'live_reachable' => $live,
+                ];
+            }
+        }
+
+        return $mismatches;
     }
 
     private function nextBackendHint(BackendHealthRegistry $healthRegistry): ?string

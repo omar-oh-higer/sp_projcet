@@ -43,6 +43,15 @@ return [
     /** HTTP timeout when forwarding to worker nodes (seconds). */
     'http_timeout' => (int) env('LOAD_HTTP_TIMEOUT', 5),
 
+    /** Live probe timeout when checking /up on each node (seconds). */
+    'probe_timeout' => (int) env('LOAD_PROBE_TIMEOUT', 1),
+
+    /** Run live probe when fetching distribution stats (may add latency). */
+    'probe_on_stats' => (bool) env('LOAD_PROBE_ON_STATS', true),
+
+    /** Max Round Robin retries when a worker node is unreachable. */
+    'gateway_max_retries' => (int) env('LOAD_GATEWAY_MAX_RETRIES', 3),
+
     /** Delay between demo UI requests so rotation is visible (milliseconds). */
     'demo_request_delay_ms' => (int) env('LOAD_DEMO_REQUEST_DELAY_MS', 300),
 

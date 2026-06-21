@@ -23,6 +23,23 @@ class NodeIdentity
     }
 
     /**
+     * True when this PHP process is the configured worker for the backend
+     * (avoid loopback HTTP on single-threaded `php artisan serve`).
+     *
+     * @param  array{id: string, url: string, port: int}  $backend
+     */
+    public function isCurrentBackend(array $backend): bool
+    {
+        $configuredId = config('load_balancing.node_id');
+
+        if (is_string($configuredId) && $configuredId !== '' && $configuredId === $backend['id']) {
+            return true;
+        }
+
+        return (int) config('load_balancing.node_port', 8000) === (int) $backend['port'];
+    }
+
+    /**
      * Build worker JSON payload for a processed task.
      *
      * @return array{

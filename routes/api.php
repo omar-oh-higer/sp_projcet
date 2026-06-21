@@ -60,6 +60,7 @@ Route::middleware('throttle:purchases')->group(function () {
     Route::post('/load/process-single', [LoadDistributionController::class, 'processSingle']);
     Route::post('/load/process-balanced', [LoadDistributionController::class, 'processBalanced']);
     Route::get('/load/distribution-stats', [LoadDistributionController::class, 'stats']);
+    Route::get('/load/probe-nodes', [LoadDistributionController::class, 'probeNodes']);
     Route::post('/load/set-server-health', [LoadDistributionController::class, 'setServerHealth']);
     Route::post('/load/distribution-reset', [LoadDistributionController::class, 'reset']);
 

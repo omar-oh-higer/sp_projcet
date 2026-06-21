@@ -289,6 +289,9 @@ export function nfrDemo(tasks) {
             phase: '',
             multiPortLog: [],
             multiPortError: null,
+            liveNodeHealth: [],
+            scenarioMode: 'simulated',
+            lastProbeError: null,
         },
         cacheScenario: {
             stats: null,
@@ -352,6 +355,9 @@ export function nfrDemo(tasks) {
             if (this.activeTask === 'aop') {
                 this.fetchPerformanceStatus();
             }
+            if (this.activeTask === 5) {
+                this.fetchLoadStatus();
+            }
         },
 
         t(en, ar) {
@@ -374,6 +380,9 @@ export function nfrDemo(tasks) {
             }
             if (id === 'aop') {
                 this.fetchPerformanceStatus();
+            }
+            if (id === 5) {
+                this.fetchLoadStatus();
             }
         },
 
@@ -470,9 +479,36 @@ export function nfrDemo(tasks) {
             if (r.ok && r.body) {
                 this.loadScenario.stats = r.body;
                 this.stats.distribution = r.body;
+                this.loadScenario.liveNodeHealth = r.body.live_node_health ?? [];
+                this.loadScenario.scenarioMode = r.body.scenario_mode_hint ?? 'simulated';
             }
 
             return r;
+        },
+
+        async probeLoadNodes(sync = true) {
+            const params = sync ? '?sync=1' : '?sync=0';
+            const r = await callApi({ method: 'GET', path: `/api/load/probe-nodes${params}` });
+
+            if (r.ok && r.body) {
+                this.loadScenario.liveNodeHealth = r.body.live_node_health ?? [];
+                this.loadScenario.scenarioMode = r.body.scenario_mode_hint ?? 'simulated';
+                this.loadScenario.lastProbeError = null;
+
+                if (this.loadScenario.stats) {
+                    this.loadScenario.stats.live_node_health = this.loadScenario.liveNodeHealth;
+                    this.loadScenario.stats.scenario_mode_hint = this.loadScenario.scenarioMode;
+                    this.loadScenario.stats.backend_health = r.body.backend_health ?? this.loadScenario.stats.backend_health;
+                }
+            } else {
+                this.loadScenario.lastProbeError = r.body?.message || `HTTP ${r.status}`;
+            }
+
+            return r;
+        },
+
+        loadUsesLiveHttp() {
+            return this.loadScenario.scenarioMode === 'live' || this.loadScenario.scenarioMode === 'degraded';
         },
 
         loadRequestDelayMs() {
@@ -490,6 +526,7 @@ export function nfrDemo(tasks) {
             this.loadScenario.phase = '';
             this.loadScenario.multiPortLog = [];
             this.loadScenario.multiPortError = null;
+            this.loadScenario.lastProbeError = null;
             await this.fetchLoadStatus();
         },
 
@@ -501,35 +538,124 @@ export function nfrDemo(tasks) {
             }
         },
 
+        async runLoadProcessRoutes(path, count, startTask = 1) {
+            for (let i = 0; i < count; i++) {
+                const taskNumber = startTask + i;
+                const r = await callApi({
+                    method: 'POST',
+                    path,
+                    body: { task_number: taskNumber },
+                });
+
+                if (!r.ok || r.body?.error) {
+                    const hint = typeof r.body === 'object' && (r.body?.hint_en || r.body?.hint_ar)
+                        ? (this.lang === 'ar' ? r.body.hint_ar : r.body.hint_en)
+                        : null;
+                    const skipped = Array.isArray(r.body?.skipped_backends)
+                        ? r.body.skipped_backends.join(', ')
+                        : '';
+                    const detail = typeof r.body === 'object' && r.body?.detail ? r.body.detail : '';
+
+                    this.loadScenario.lastProbeError = hint
+                        ?? (skipped
+                            ? this.t(
+                                `Skipped unreachable: ${skipped}`,
+                                `تخطي غير متاح: ${skipped}`,
+                            )
+                            : (detail || r.body?.message || `HTTP ${r.status}`));
+
+                    throw new Error(this.loadScenario.lastProbeError);
+                }
+
+                const skipped = r.body?.skipped_backends ?? [];
+                if (skipped.length > 0) {
+                    this.loadScenario.phase = this.t(
+                        `Task ${taskNumber} → port ${r.body?.target_port} (skipped: ${skipped.join(', ')})`,
+                        `مهمة ${taskNumber} → منفذ ${r.body?.target_port} (تخطي: ${skipped.join(', ')})`,
+                    );
+                }
+
+                await this.fetchLoadStatus();
+                await this.loadSleep();
+            }
+        },
+
         async runLoadFullScenario(taskId) {
             this.loadScenario.loading = true;
             this.loadScenario.multiPortError = null;
+            this.loadScenario.lastProbeError = null;
 
             try {
                 await this.resetLoadDemo();
 
                 this.loadScenario.phase = this.t(
-                    'Phase 1: 9× vertical (single)',
-                    'المرحلة 1: 9× single عمودي',
+                    'Phase 0: probe live nodes + sync health',
+                    'المرحلة 0: فحص العقد الحية',
                 );
-                await this.runLoadRoutes('/api/load/route-single', 9);
+                await this.probeLoadNodes(true);
+                await this.loadSleep();
+
+                const useLive = this.loadUsesLiveHttp();
+
+                if (!useLive) {
+                    this.loadScenario.phase = this.t(
+                        'Simulation mode — only gateway reachable. Start .\\scripts\\start-multi-server.ps1 for live HTTP.',
+                        'وضع محاكاة — شغّل start-multi-server.ps1 للـ HTTP الحقيقي',
+                    );
+                    await this.loadSleep();
+                }
 
                 this.loadScenario.phase = this.t(
-                    'Phase 2: 9× horizontal (Round Robin)',
-                    'المرحلة 2: 9× balanced أفقي',
+                    useLive
+                        ? 'Phase 1: 9× process-single (real HTTP → port 8000)'
+                        : 'Phase 1: 9× route-single (simulated)',
+                    useLive
+                        ? 'المرحلة 1: 9× process-single (HTTP حقيقي)'
+                        : 'المرحلة 1: 9× route-single (محاكاة)',
                 );
-                await this.runLoadRoutes('/api/load/route-balanced', 9);
+
+                if (useLive) {
+                    await this.runLoadProcessRoutes('/api/load/process-single', 9, 1);
+                } else {
+                    await this.runLoadRoutes('/api/load/route-single', 9);
+                }
 
                 this.loadScenario.phase = this.t(
-                    'Phase 3: server-2 down + 6× balanced',
-                    'المرحلة 3: server-2 معطّل + 6× balanced',
+                    useLive
+                        ? 'Phase 2: 9× process-balanced (real Round Robin)'
+                        : 'Phase 2: 9× route-balanced (simulated)',
+                    useLive
+                        ? 'المرحلة 2: 9× process-balanced (HTTP حقيقي)'
+                        : 'المرحلة 2: 9× route-balanced (محاكاة)',
                 );
+
+                if (useLive) {
+                    await this.runLoadProcessRoutes('/api/load/process-balanced', 9, 10);
+                } else {
+                    await this.runLoadRoutes('/api/load/route-balanced', 9);
+                }
+
+                this.loadScenario.phase = this.t(
+                    'Phase 3: re-probe + server-2 down + 6× balanced',
+                    'المرحلة 3: إعادة فحص + server-2 معطّل + 6× balanced',
+                );
+                await this.probeLoadNodes(true);
                 await this.setServerHealth('server-2', false);
-                await this.runLoadRoutes('/api/load/route-balanced', 6);
+
+                if (useLive) {
+                    await this.runLoadProcessRoutes('/api/load/process-balanced', 6, 19);
+                } else {
+                    await this.runLoadRoutes('/api/load/route-balanced', 6);
+                }
+
+                this.loadScenario.phase = this.t('Phase 4: refresh summary', 'المرحلة 4: تحديث');
+                await this.fetchLoadStatus();
 
                 this.loadScenario.phase = this.t('Done', 'اكتمل');
                 await this.runSide(taskId, 'before');
                 await this.runSide(taskId, 'after');
+            } catch (e) {
+                this.loadScenario.lastProbeError = String(e.message || e);
             } finally {
                 this.loadScenario.loading = false;
             }

@@ -18,6 +18,7 @@ class MultiServerProcessGateway
         private BackendPool $backendPool,
         private LoadDistributionRecorder $recorder,
         private NodeIdentity $nodeIdentity,
+        private BackendHealthRegistry $healthRegistry,
     ) {}
 
     /**
@@ -35,20 +36,62 @@ class MultiServerProcessGateway
      */
     public function forwardBalanced(int $taskNumber): array
     {
-        try {
-            $targetId = $this->balancer->nextBackend();
-        } catch (\RuntimeException $e) {
-            return [
-                'message' => $e->getMessage(),
-                'error' => 'no_healthy_backends',
-            ];
+        $skippedBackends = [];
+        $attempts = 0;
+        $lastError = null;
+        $maxAttempts = $this->maxBalancedAttempts();
+
+        while ($attempts < $maxAttempts) {
+            $attempts++;
+
+            try {
+                $targetId = $this->balancer->nextBackend();
+            } catch (\RuntimeException $e) {
+                return [
+                    'message' => $e->getMessage(),
+                    'error' => 'no_healthy_backends',
+                    'skipped_backends' => array_values(array_unique($skippedBackends)),
+                    'attempts' => $attempts,
+                ];
+            }
+
+            $result = $this->forwardTo($targetId, 'round_robin', $taskNumber);
+
+            if (! isset($result['error'])) {
+                return array_merge($result, [
+                    'attempts' => $attempts,
+                    'skipped_backends' => array_values(array_unique($skippedBackends)),
+                ]);
+            }
+
+            $lastError = $result;
+
+            if ($this->shouldRetryAfterFailure($result)) {
+                $this->healthRegistry->setHealthy($targetId, false);
+                $skippedBackends[] = $targetId;
+
+                continue;
+            }
+
+            return array_merge($result, [
+                'attempts' => $attempts,
+                'skipped_backends' => array_values(array_unique($skippedBackends)),
+            ]);
         }
 
-        return $this->forwardTo($targetId, 'round_robin', $taskNumber);
+        return array_merge(
+            $lastError ?? [
+                'message' => 'Max retries exceeded while forwarding to worker nodes.',
+                'error' => 'max_retries',
+            ],
+            [
+                'attempts' => $attempts,
+                'skipped_backends' => array_values(array_unique($skippedBackends)),
+            ],
+        );
     }
 
     /**
-     * @param  array{id: string, url: string, port: int}  $backend
      * @return array<string, mixed>
      */
     private function forwardTo(string $targetId, string $distributionMode, int $taskNumber): array
@@ -144,17 +187,25 @@ class MultiServerProcessGateway
         ];
     }
 
+    /** @param  array<string, mixed>  $result */
+    private function shouldRetryAfterFailure(array $result): bool
+    {
+        return in_array($result['error'] ?? null, ['connection_failed', 'worker_error'], true);
+    }
+
+    private function maxBalancedAttempts(): int
+    {
+        $poolSize = count($this->healthRegistry->healthyBackendIds());
+        $configured = (int) config('load_balancing.gateway_max_retries', 3);
+
+        return max($poolSize, $configured, 1);
+    }
+
     /**
      * @param  array{id: string, url: string, port: int}  $backend
      */
     private function isCurrentNode(string $targetId, array $backend): bool
     {
-        $configuredId = config('load_balancing.node_id');
-
-        if (is_string($configuredId) && $configuredId !== '' && $configuredId === $targetId) {
-            return true;
-        }
-
-        return (int) config('load_balancing.node_port', 8000) === (int) $backend['port'];
+        return $this->nodeIdentity->isCurrentBackend($backend);
     }
 }

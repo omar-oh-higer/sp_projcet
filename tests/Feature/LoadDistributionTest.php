@@ -18,6 +18,7 @@ class LoadDistributionTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['load_balancing.probe_on_stats' => false]);
         $this->resetLoadBalancingState();
     }
 
@@ -291,12 +292,121 @@ class LoadDistributionTest extends TestCase
             ->expectsOutput('Task 4 -> Handled by node on port 8000');
     }
 
-    /**
-     * @return void
-     */
-    private function fakeWorkerHttpResponses(): void
+    public function test_probe_nodes_marks_unreachable_backend(): void
+    {
+        $this->fakeHealthProbeResponses(failPorts: [8001]);
+
+        $response = $this->getJson('/api/load/probe-nodes?sync=1');
+
+        $response->assertOk()
+            ->assertJsonPath('scenario_mode_hint', 'degraded')
+            ->assertJsonStructure(['live_node_health', 'registry_synced', 'backend_health']);
+
+        $health = collect($response->json('live_node_health'));
+        $server2 = $health->firstWhere('server_id', 'server-2');
+
+        $this->assertNotNull($server2);
+        $this->assertFalse($server2['reachable']);
+        $this->assertFalse($response->json('registry_synced.server-2'));
+    }
+
+    public function test_distribution_stats_include_live_node_health_when_probe_enabled(): void
+    {
+        config(['load_balancing.probe_on_stats' => true]);
+        $this->fakeHealthProbeResponses();
+
+        $response = $this->getJson('/api/load/distribution-stats');
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'live_node_health',
+                'scenario_mode_hint',
+                'health_mismatch',
+            ])
+            ->assertJsonPath('scenario_mode_hint', 'live');
+    }
+
+    public function test_process_balanced_skips_down_node_and_retries(): void
+    {
+        config([
+            'load_balancing.node_id' => 'server-1',
+            'load_balancing.node_port' => 8000,
+        ]);
+
+        Cache::put('load_balancer:rr_index', 1, 3600);
+
+        $this->fakeWorkerHttpResponses(failPorts: [8001]);
+
+        $response = $this->postJson('/api/load/process-balanced', ['task_number' => 1]);
+
+        $response->assertOk()
+            ->assertJsonPath('target_port', 8000)
+            ->assertJsonFragment(['skipped_backends' => ['server-2']]);
+
+        $this->assertSame(0, LoadDistributionHit::query()->where('target_server', 'server-2')->count());
+        $this->assertFalse(app(BackendHealthRegistry::class)->isHealthy('server-2'));
+    }
+
+    public function test_probe_marks_current_gateway_reachable_without_http_loopback(): void
     {
         Http::fake(function (Request $request) {
+            if (str_contains($request->url(), ':8000/up')) {
+                return Http::response('should not be called', 500);
+            }
+
+            if (str_contains($request->url(), '/up')) {
+                return Http::response('ok', 200);
+            }
+
+            return Http::response(['message' => 'not found'], 404);
+        });
+
+        config([
+            'load_balancing.node_id' => 'server-1',
+            'load_balancing.node_port' => 8000,
+        ]);
+
+        $response = $this->getJson('/api/load/probe-nodes?sync=1');
+
+        $response->assertOk()
+            ->assertJsonPath('registry_synced.server-1', true);
+
+        $server1 = collect($response->json('live_node_health'))->firstWhere('server_id', 'server-1');
+        $this->assertTrue($server1['reachable']);
+        $this->assertTrue($server1['probed_in_process']);
+
+        Http::assertSent(function (Request $request) {
+            return ! str_contains($request->url(), ':8000/up');
+        });
+    }
+
+    /**
+     * @param  list<int>  $failPorts
+     */
+    private function fakeHealthProbeResponses(array $failPorts = []): void
+    {
+        Http::fake(function (Request $request) use ($failPorts) {
+            if (! str_contains($request->url(), '/up')) {
+                return Http::response(['message' => 'not found'], 404);
+            }
+
+            foreach ([8000, 8001, 8002] as $port) {
+                if (str_contains($request->url(), ":{$port}") && in_array($port, $failPorts, true)) {
+                    return Http::response('Service Unavailable', 503);
+                }
+            }
+
+            return Http::response('ok', 200);
+        });
+    }
+
+    /**
+     * @param  list<int>  $failPorts
+     * @return void
+     */
+    private function fakeWorkerHttpResponses(array $failPorts = []): void
+    {
+        Http::fake(function (Request $request) use ($failPorts) {
             $url = $request->url();
 
             if (str_contains($url, ':8000')) {
@@ -310,6 +420,10 @@ class LoadDistributionTest extends TestCase
                 $id = 'server-3';
             } else {
                 return Http::response(['message' => 'not found'], 404);
+            }
+
+            if (in_array($port, $failPorts, true)) {
+                return Http::response(['message' => 'node down'], 503);
             }
 
             $taskNumber = (int) ($request->data()['task_number'] ?? 1);

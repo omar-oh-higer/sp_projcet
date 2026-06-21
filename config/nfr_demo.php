@@ -100,7 +100,10 @@ return [
             'problem_ar' => 'توجيه كل الحركة لخادم واحد (توسع عمودي) يخلق نقطة فشل واحدة عند الذروة.',
             'solution_en' => 'Round Robin across healthy backends — horizontal scaling spreads load.',
             'solution_ar' => 'Round Robin عبر الخوادم السليمة — التوسع الأفقي يوزع الحمل.',
-            'prerequisites' => [],
+            'prerequisites' => [
+                'serve' => true,
+                'multi_server_optional' => true,
+            ],
             'before' => [
                 'method' => 'POST',
                 'path' => '/api/load/route-single',

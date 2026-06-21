@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\SetServerHealthRequest;
+use App\Services\LoadBalancing\BackendHealthProbe;
 use App\Services\LoadBalancing\BackendPool;
 use App\Services\LoadBalancing\BackendHealthRegistry;
 use App\Services\LoadBalancing\LoadDistributionRecorder;
@@ -74,13 +75,45 @@ class LoadDistributionController extends Controller
         LoadDistributionRecorder $recorder,
         BackendHealthRegistry $healthRegistry,
         LoadDistributionStatusBuilder $statusBuilder,
+        BackendHealthProbe $backendHealthProbe,
     ): JsonResponse {
         $base = $recorder->stats($healthRegistry);
-        $enriched = $statusBuilder->build($base, $healthRegistry);
+
+        $liveNodeHealth = [];
+        $scenarioModeHint = 'simulated';
+
+        if (config('load_balancing.probe_on_stats', true)) {
+            $liveNodeHealth = $backendHealthProbe->probeAll();
+            $scenarioModeHint = $backendHealthProbe->scenarioModeHint($liveNodeHealth);
+        }
+
+        $enriched = $statusBuilder->build($base, $healthRegistry, $liveNodeHealth, $scenarioModeHint);
 
         return response()->json(array_merge($base, $enriched, [
             'demo_request_delay_ms' => (int) config('load_balancing.demo_request_delay_ms', 300),
         ]));
+    }
+
+    /** Live HTTP probe of each worker node /up endpoint; optional registry sync. */
+    public function probeNodes(
+        Request $request,
+        BackendHealthProbe $backendHealthProbe,
+        BackendHealthRegistry $healthRegistry,
+    ): JsonResponse {
+        $liveNodeHealth = $backendHealthProbe->probeAll();
+        $synced = null;
+
+        if ($request->boolean('sync', true)) {
+            $synced = $backendHealthProbe->syncToRegistry($liveNodeHealth);
+        }
+
+        return response()->json([
+            'message' => 'Live node health probe completed.',
+            'live_node_health' => $liveNodeHealth,
+            'scenario_mode_hint' => $backendHealthProbe->scenarioModeHint($liveNodeHealth),
+            'registry_synced' => $synced,
+            'backend_health' => $healthRegistry->healthSnapshot(),
+        ]);
     }
 
     /** Demo: mark a backend healthy/unhealthy (lecture Server B removed from rotation). */
