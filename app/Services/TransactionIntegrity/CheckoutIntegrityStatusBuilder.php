@@ -11,7 +11,7 @@ class CheckoutIntegrityStatusBuilder
     {
         $productId = $exampleProductId ?? 1;
         $recent = $metrics->recentCheckouts();
-        $snapshot = $metrics->snapshot();
+        $snapshot = $metrics->snapshot($productId);
 
         $nonAtomicViolationsInLog = 0;
         $acidFailuresInLog = 0;
@@ -36,8 +36,8 @@ class CheckoutIntegrityStatusBuilder
                 'message_ar' => $this->messageAr($row),
             ], $recent),
             'db_audit' => [
-                'orphan_payments' => $metrics->orphanPaymentCount(),
-                'orders_without_payment' => $metrics->ordersWithoutPaymentCount(),
+                'orphan_payments' => $metrics->orphanPaymentCount($productId),
+                'orders_without_payment' => $metrics->ordersWithoutPaymentCount($productId),
             ],
             'example_product_id' => $productId,
             'product_snapshot' => $product ? [

@@ -65,7 +65,7 @@ class CheckoutIntegrityController extends Controller
             'currency' => config('checkout_integrity.currency_label', 'USD'),
             'demo_stock' => (int) config('checkout_integrity.demo_stock', 10),
             'demo_request_delay_ms' => (int) config('checkout_integrity.demo_request_delay_ms', 400),
-            'metrics' => $checkoutIntegrityMetrics->snapshot(),
+            'metrics' => $checkoutIntegrityMetrics->snapshot($productId),
             ...$view,
         ]);
     }
@@ -120,7 +120,7 @@ class CheckoutIntegrityController extends Controller
                 : 'Demo stock restored and orphan payments cleaned (metrics kept for scenario log).',
             'product_id' => $productId,
             'stock' => $demoStock,
-            'orphan_payments' => $checkoutIntegrityMetrics->orphanPaymentCount(),
+            'orphan_payments' => $checkoutIntegrityMetrics->orphanPaymentCount($productId),
             'metrics_reset' => $resetMetrics,
         ]);
     }

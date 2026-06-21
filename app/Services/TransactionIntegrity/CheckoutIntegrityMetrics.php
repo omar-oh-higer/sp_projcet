@@ -66,7 +66,7 @@ class CheckoutIntegrityMetrics
         ?int $orderId = null,
         ?int $stockAfter = null,
     ): void {
-        $orphanCount = $this->orphanPaymentCount();
+        $orphanCount = $this->orphanPaymentCount($productId);
 
         $this->mutate(static function (array &$state) use (
             $transactionMode,
@@ -124,24 +124,34 @@ class CheckoutIntegrityMetrics
         return $this->loadState()['recent_checkouts'];
     }
 
-    public function orphanPaymentCount(): int
+    public function orphanPaymentCount(?int $productId = null): int
     {
-        return Payment::query()
+        $query = Payment::query()
             ->where('status', 'captured')
-            ->whereNull('order_id')
-            ->count();
+            ->whereNull('order_id');
+
+        if ($productId !== null) {
+            $query->where('product_id', $productId);
+        }
+
+        return $query->count();
     }
 
-    public function ordersWithoutPaymentCount(): int
+    public function ordersWithoutPaymentCount(?int $productId = null): int
     {
-        return Order::query()
+        $query = Order::query()
             ->where('status', 'success')
-            ->whereNull('payment_id')
-            ->count();
+            ->whereNull('payment_id');
+
+        if ($productId !== null) {
+            $query->where('product_id', $productId);
+        }
+
+        return $query->count();
     }
 
     /** @return array<string, int> */
-    public function snapshot(): array
+    public function snapshot(?int $productId = null): array
     {
         $state = $this->loadState();
 
@@ -151,8 +161,8 @@ class CheckoutIntegrityMetrics
             'acid_successes' => $state['acid_successes'],
             'acid_failures' => $state['acid_failures'],
             'integrity_violations' => $state['integrity_violations'],
-            'orphan_payments' => $this->orphanPaymentCount(),
-            'orders_without_payment' => $this->ordersWithoutPaymentCount(),
+            'orphan_payments' => $this->orphanPaymentCount($productId),
+            'orders_without_payment' => $this->ordersWithoutPaymentCount($productId),
         ];
     }
 

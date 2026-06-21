@@ -399,4 +399,68 @@ class TransactionIntegrityTest extends TestCase
             ->assertJsonPath('db_audit.orphan_payments', 0)
             ->assertJsonPath('metrics.integrity_violations', 1);
     }
+
+    public function test_acid_orphan_count_is_scoped_to_demo_product_not_global(): void
+    {
+        $demoStock = (int) config('checkout_integrity.demo_stock', 10);
+
+        $product = Product::query()->create([
+            'name' => 'Scoped Product',
+            'stock' => $demoStock,
+            'price_cents' => 1000,
+            'version' => 0,
+        ]);
+
+        $otherProduct = Product::query()->create([
+            'name' => 'Other Product',
+            'stock' => $demoStock,
+            'price_cents' => 1000,
+            'version' => 0,
+        ]);
+
+        Payment::query()->create([
+            'product_id' => $otherProduct->id,
+            'amount_cents' => 1000,
+            'status' => 'captured',
+            'payment_reference' => 'pay_other_product_orphan',
+            'order_id' => null,
+        ]);
+
+        $this->postJson('/api/checkout/demo-reset', [
+            'product_id' => $product->id,
+        ])->assertOk();
+
+        $this->postJson('/api/checkout/non-atomic', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], [
+            'X-SIMULATE-FAIL-AT' => 'after_payment',
+        ])->assertStatus(500);
+
+        $this->postJson('/api/checkout/demo-reset', [
+            'product_id' => $product->id,
+            'reset_metrics' => false,
+        ])->assertOk()
+            ->assertJsonPath('orphan_payments', 0);
+
+        $this->postJson('/api/checkout/acid', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], [
+            'X-SIMULATE-FAIL-AT' => 'after_payment',
+        ])->assertStatus(500);
+
+        $stats = $this->getJson('/api/checkout/integrity-stats?product_id='.$product->id);
+        $stats->assertOk()
+            ->assertJsonPath('db_audit.orphan_payments', 0)
+            ->assertJsonPath('metrics.orphan_payments', 0);
+
+        $acidRow = collect($stats->json('recent_checkouts'))
+            ->first(fn (array $row) => ($row['transaction_mode'] ?? '') === 'acid');
+
+        $this->assertNotNull($acidRow);
+        $this->assertSame(0, $acidRow['orphan_payments_after']);
+
+        $this->assertSame(1, Payment::query()->whereNull('order_id')->count());
+    }
 }
