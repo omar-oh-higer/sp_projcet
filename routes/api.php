@@ -31,9 +31,13 @@ Route::middleware('throttle:purchases')->group(function () {
     Route::post('/checkout/acid', [CheckoutIntegrityController::class, 'checkoutAcid']);
     Route::get('/checkout/integrity-stats', [CheckoutIntegrityController::class, 'stats']);
     Route::post('/checkout/integrity-reset', [CheckoutIntegrityController::class, 'reset']);
+    Route::post('/checkout/demo-reset', [CheckoutIntegrityController::class, 'demoReset']);
 
     Route::get('/stress/last-report', [StressTestController::class, 'lastReport']);
+    Route::get('/stress/stats', [StressTestController::class, 'stats']);
     Route::post('/stress/reset', [StressTestController::class, 'reset']);
+    Route::post('/stress/demo-reset', [StressTestController::class, 'demoReset']);
+    Route::post('/stress/demo-run', [StressTestController::class, 'demoRun']);
 
     Route::get('/benchmark/sales-report/slow', [BenchmarkController::class, 'salesReportSlow']);
     Route::get('/benchmark/sales-report/optimized', [BenchmarkController::class, 'salesReportOptimized']);

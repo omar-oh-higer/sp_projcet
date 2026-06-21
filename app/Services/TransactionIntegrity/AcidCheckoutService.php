@@ -100,22 +100,28 @@ class AcidCheckoutService
         } catch (SimulatedCheckoutFailureException $exception) {
             $this->checkoutIntegrityMetrics->recordAcidFailure();
 
-            return [
+            $result = [
                 'status' => 'simulated_failure',
                 'transaction_mode' => 'acid',
                 'fail_at' => $exception->failAt,
                 'integrity_violation' => false,
                 'rolled_back' => true,
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         } catch (PaymentDeclinedException $exception) {
             $this->checkoutIntegrityMetrics->recordAcidFailure();
 
-            return [
+            $result = [
                 'status' => 'payment_declined',
                 'transaction_mode' => 'acid',
                 'amount_cents' => $exception->amountCents,
                 'rolled_back' => true,
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         }
 
         if (($result['status'] ?? null) === 'success') {
@@ -124,6 +130,8 @@ class AcidCheckoutService
         } elseif (($result['status'] ?? null) === 'insufficient_stock') {
             $this->checkoutIntegrityMetrics->recordAcidFailure();
         }
+
+        $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
 
         return $result;
     }

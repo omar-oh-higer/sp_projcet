@@ -179,7 +179,7 @@ return [
             ],
             'highlights' => ['status', 'transaction_mode', 'integrity_violation', 'order_id', 'payment_id'],
             'simulate_headers' => true,
-            'integrity_stats' => true,
+            'integrity_scenario' => true,
         ],
 
         9 => [
@@ -188,12 +188,12 @@ return [
             'title_ar' => 'المهمة 9 — اختبار الضغط',
             'problem_en' => 'You cannot know system limits until you simulate many concurrent users safely.',
             'problem_ar' => 'لا تعرف حدود النظام حتى تحاكي مستخدمين متزامنين بأمان.',
-            'solution_en' => 'Run CLI stress test, then read the report via API for proof.',
-            'solution_ar' => 'شغّل اختبار الضغط من CLI ثم اقرأ التقرير عبر API كدليل.',
-            'prerequisites' => ['cli' => 'php artisan stress:concurrent --users=50 --scenario=safe'],
-            'read_only' => true,
-            'report_path' => '/api/stress/last-report',
+            'solution_en' => 'Http::pool concurrent checkout stress — unsafe non-atomic vs safe ACID with integrity report.',
+            'solution_ar' => 'Http::pool — ضغط concurrent على non-atomic vs ACID مع تقرير سلامة.',
+            'prerequisites' => ['serve' => true, 'stress_main_port' => true],
+            'report_path' => '/api/stress/stats',
             'highlights' => ['success_requests', 'failed_requests', 'average_response_time_ms', 'data_integrity_pass'],
+            'stress_scenario' => true,
         ],
 
         10 => [

@@ -78,7 +78,13 @@ class StressTestReportBuilder
             File::put($markdownPath, $this->toMarkdown($reports));
         }
 
-        $this->stressTestMetrics->lastReport = $combined;
+        $this->stressTestMetrics->recordCombinedReport($combined);
+    }
+
+    /** @return array<string, mixed>|null */
+    public function lastCombinedReport(): ?array
+    {
+        return $this->stressTestMetrics->lastReport();
     }
 
     /** @param array<string, mixed> $runMetrics @param array<string, mixed> $integrity */

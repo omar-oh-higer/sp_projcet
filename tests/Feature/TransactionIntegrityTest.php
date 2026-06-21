@@ -236,4 +236,167 @@ class TransactionIntegrityTest extends TestCase
             ->assertJsonPath('metrics.integrity_violations', 1)
             ->assertJsonPath('metrics.orphan_payments', 1);
     }
+
+    public function test_integrity_stats_includes_enriched_demo_fields(): void
+    {
+        $product = Product::query()->create([
+            'name' => 'Enriched Stats Product',
+            'stock' => 10,
+            'price_cents' => 500,
+            'version' => 0,
+        ]);
+
+        $response = $this->getJson('/api/checkout/integrity-stats?product_id='.$product->id);
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'metrics',
+                'recent_checkouts',
+                'db_audit' => ['orphan_payments', 'orders_without_payment'],
+                'scenario_summary',
+                'product_snapshot',
+                'demo_stock',
+                'demo_request_delay_ms',
+                'refreshed_at',
+            ]);
+    }
+
+    public function test_demo_reset_restores_stock_and_clears_orphan_payments(): void
+    {
+        $demoStock = (int) config('checkout_integrity.demo_stock', 10);
+
+        $product = Product::query()->create([
+            'name' => 'Reset Product',
+            'stock' => 3,
+            'price_cents' => 800,
+            'version' => 2,
+        ]);
+
+        Payment::query()->create([
+            'product_id' => $product->id,
+            'amount_cents' => 800,
+            'status' => 'captured',
+            'payment_reference' => 'pay_orphan_test',
+            'order_id' => null,
+        ]);
+
+        $response = $this->postJson('/api/checkout/demo-reset', [
+            'product_id' => $product->id,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('stock', $demoStock)
+            ->assertJsonPath('orphan_payments', 0)
+            ->assertJsonPath('metrics_reset', true);
+
+        $this->assertDatabaseHas('products', [
+            'id' => $product->id,
+            'stock' => $demoStock,
+            'version' => 0,
+        ]);
+
+        $this->assertSame(0, Payment::query()->whereNull('order_id')->count());
+    }
+
+    public function test_demo_reset_with_reset_metrics_false_keeps_checkout_log(): void
+    {
+        $product = Product::query()->create([
+            'name' => 'Keep Log Product',
+            'stock' => 10,
+            'price_cents' => 600,
+            'version' => 0,
+        ]);
+
+        $this->postJson('/api/checkout/non-atomic', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], [
+            'X-SIMULATE-FAIL-AT' => 'after_payment',
+        ])->assertStatus(500);
+
+        $beforeReset = $this->getJson('/api/checkout/integrity-stats?product_id='.$product->id);
+        $logCountBefore = count($beforeReset->json('recent_checkouts'));
+
+        $this->assertGreaterThan(0, $logCountBefore);
+
+        $this->postJson('/api/checkout/demo-reset', [
+            'product_id' => $product->id,
+            'reset_metrics' => false,
+        ])->assertOk();
+
+        $afterReset = $this->getJson('/api/checkout/integrity-stats?product_id='.$product->id);
+
+        $this->assertSame($logCountBefore, count($afterReset->json('recent_checkouts')));
+        $this->assertSame(0, $afterReset->json('db_audit.orphan_payments'));
+    }
+
+    public function test_metrics_persist_across_separate_http_requests(): void
+    {
+        $product = Product::query()->create([
+            'name' => 'Persist Product',
+            'stock' => 5,
+            'price_cents' => 400,
+            'version' => 0,
+        ]);
+
+        $this->postJson('/api/checkout/non-atomic', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], [
+            'X-SIMULATE-FAIL-AT' => 'after_payment',
+        ])->assertStatus(500);
+
+        $this->app->forgetInstance(CheckoutIntegrityMetrics::class);
+
+        $response = $this->getJson('/api/checkout/integrity-stats');
+
+        $response->assertOk()
+            ->assertJsonPath('metrics.integrity_violations', 1)
+            ->assertJsonPath('metrics.non_atomic_failures', 1);
+    }
+
+    public function test_full_scenario_sequence_non_atomic_orphan_then_acid_clean(): void
+    {
+        $demoStock = (int) config('checkout_integrity.demo_stock', 10);
+
+        $product = Product::query()->create([
+            'name' => 'Scenario Product',
+            'stock' => $demoStock,
+            'price_cents' => 1000,
+            'version' => 0,
+        ]);
+
+        $this->postJson('/api/checkout/demo-reset', [
+            'product_id' => $product->id,
+        ])->assertOk();
+
+        $this->postJson('/api/checkout/non-atomic', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], [
+            'X-SIMULATE-FAIL-AT' => 'after_payment',
+        ])->assertStatus(500);
+
+        $this->assertSame(1, Payment::query()->whereNull('order_id')->count());
+
+        $this->postJson('/api/checkout/demo-reset', [
+            'product_id' => $product->id,
+            'reset_metrics' => false,
+        ])->assertOk()
+            ->assertJsonPath('orphan_payments', 0);
+
+        $this->postJson('/api/checkout/acid', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], [
+            'X-SIMULATE-FAIL-AT' => 'after_payment',
+        ])->assertStatus(500);
+
+        $this->assertSame(0, Payment::query()->whereNull('order_id')->count());
+
+        $stats = $this->getJson('/api/checkout/integrity-stats?product_id='.$product->id);
+        $stats->assertOk()
+            ->assertJsonPath('db_audit.orphan_payments', 0)
+            ->assertJsonPath('metrics.integrity_violations', 1);
+    }
 }

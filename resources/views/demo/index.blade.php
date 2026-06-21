@@ -86,6 +86,12 @@
                                     @if(!empty($task['prerequisites']['multi_server_optional']))
                                         <li x-text="t('Optional: .\\scripts\\start-multi-server.ps1 + CACHE_STORE=database for real HTTP nodes', 'اختياري: multi-server + CACHE_STORE=database')"></li>
                                     @endif
+                                    @if(!empty($task['prerequisites']['serve']))
+                                        <li x-text="t('Run: php artisan serve (separate terminal)', 'شغّل: php artisan serve (terminal منفصل)')"></li>
+                                    @endif
+                                    @if(!empty($task['prerequisites']['stress_main_port']))
+                                        <li x-text="t('Task 9: use main server http://127.0.0.1:8000/demo — demo-run auto-targets the page URL you opened', 'المهمة 9: استخدم http://127.0.0.1:8000/demo — demo-run يوجّه تلقائياً لنفس URL')"></li>
+                                    @endif
                                     @if(!empty($task['prerequisites']['redis']))
                                         <li x-text="t('Redis running + PRODUCT_CACHE_STORE=redis or INVENTORY_LOCK_STORE=redis', 'Redis + إعدادات env المناسبة')"></li>
                                     @endif

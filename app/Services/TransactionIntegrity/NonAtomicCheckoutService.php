@@ -23,22 +23,29 @@ class NonAtomicCheckoutService
         ?int $userId = null,
         ?string $simulateFailAt = null,
         bool $paymentDeclined = false,
+        int $stressRaceWindowMs = 0,
     ): array {
         $product = Product::query()->find($productId);
 
         if (! $product) {
-            return [
+            $result = [
                 'status' => 'product_not_found',
                 'transaction_mode' => 'non_atomic',
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         }
 
         if ($product->stock < $quantity) {
-            return [
+            $result = [
                 'status' => 'insufficient_stock',
                 'transaction_mode' => 'non_atomic',
                 'stock' => $product->stock,
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         }
 
         $amountCents = $product->price_cents * $quantity;
@@ -48,11 +55,14 @@ class NonAtomicCheckoutService
         } catch (PaymentDeclinedException $exception) {
             $this->checkoutIntegrityMetrics->recordNonAtomicFailure();
 
-            return [
+            $result = [
                 'status' => 'payment_declined',
                 'transaction_mode' => 'non_atomic',
                 'amount_cents' => $exception->amountCents,
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         }
 
         $payment = null;
@@ -68,6 +78,10 @@ class NonAtomicCheckoutService
 
             if ($simulateFailAt === 'after_payment') {
                 throw new SimulatedCheckoutFailureException('after_payment');
+            }
+
+            if ($stressRaceWindowMs > 0) {
+                usleep($stressRaceWindowMs * 1000);
             }
 
             $product->refresh();
@@ -96,7 +110,7 @@ class NonAtomicCheckoutService
 
             $this->checkoutIntegrityMetrics->recordNonAtomicSuccess();
 
-            return [
+            $result = [
                 'status' => 'success',
                 'transaction_mode' => 'non_atomic',
                 'payment_id' => $payment->id,
@@ -106,13 +120,16 @@ class NonAtomicCheckoutService
                 'stock' => $product->stock,
                 'integrity_violation' => false,
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         } catch (SimulatedCheckoutFailureException $exception) {
             $this->checkoutIntegrityMetrics->recordNonAtomicFailure();
             $this->checkoutIntegrityMetrics->recordIntegrityViolation();
 
             $product->refresh();
 
-            return [
+            $result = [
                 'status' => 'simulated_failure',
                 'transaction_mode' => 'non_atomic',
                 'fail_at' => $exception->failAt,
@@ -122,6 +139,9 @@ class NonAtomicCheckoutService
                 'payment_reference' => $payment?->payment_reference,
                 'stock' => $product->stock,
             ];
+            $this->checkoutIntegrityMetrics->recordCheckoutFromResult($productId, $result);
+
+            return $result;
         }
     }
 }

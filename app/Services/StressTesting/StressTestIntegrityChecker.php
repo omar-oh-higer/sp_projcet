@@ -87,6 +87,10 @@ class StressTestIntegrityChecker
             $pass = $pass && $noOrphans && $ordersCreated === $successRequests;
         }
 
+        if ($scenario->key === 'unsafe' && $orphanPayments > 0) {
+            $pass = false;
+        }
+
         $notes = [];
         if (! $stockMatchesSuccess) {
             $notes[] = "Stock delta ({$unitsSoldActual}) does not match successful purchases ({$unitsSoldExpected}).";

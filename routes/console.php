@@ -603,119 +603,148 @@ Artisan::command('checkout:integrity-demo {--product=1} {--fail-at=after_payment
     $this->line('Run GET /api/checkout/integrity-stats for full metrics.');
 })->purpose('Demonstrate non-atomic vs ACID checkout rollback under simulated failure');
 
-Artisan::command('stress:concurrent {--users=} {--product=1} {--quantity=} {--baseUrl=} {--scenario=safe} {--output=both}', function () {
-    $users = (int) ($this->option('users') ?: config('stress_testing.default_users', 100));
+Artisan::command('stress:checkout-worker {--product=1} {--quantity=1} {--mode=non_atomic} {--race-window-ms=0}', function () {
     $productId = max((int) $this->option('product'), 1);
-    $quantity = (int) ($this->option('quantity') ?: config('stress_testing.default_quantity', 1));
-    $baseUrl = rtrim((string) ($this->option('baseUrl') ?: config('stress_testing.default_base_url')), '/');
-    $scenarioKey = (string) $this->option('scenario');
-    $output = (string) $this->option('output');
+    $quantity = max((int) $this->option('quantity'), 1);
+    $mode = (string) $this->option('mode');
+    $raceWindowMs = max((int) $this->option('race-window-ms'), 0);
+    $started = microtime(true);
 
-    if ($users < 1) {
-        $this->error('--users must be at least 1');
+    if (! in_array($mode, ['non_atomic', 'acid'], true)) {
+        $this->output->write(json_encode([
+            'http_status' => 422,
+            'duration_ms' => round((microtime(true) - $started) * 1000, 3),
+            'result' => ['status' => 'invalid_mode', 'transaction_mode' => $mode],
+        ]));
 
-        return;
+        return 1;
     }
 
-    if (! in_array($output, ['console', 'md', 'json', 'both'], true)) {
-        $this->error('Invalid --output. Use console, md, json, or both.');
-
-        return;
+    if ($mode === 'acid') {
+        $result = app(\App\Services\TransactionIntegrity\AcidCheckoutService::class)->checkout(
+            productId: $productId,
+            quantity: $quantity,
+        );
+    } else {
+        $result = app(\App\Services\TransactionIntegrity\NonAtomicCheckoutService::class)->checkout(
+            productId: $productId,
+            quantity: $quantity,
+            stressRaceWindowMs: $raceWindowMs,
+        );
     }
 
-    $product = Product::query()->find($productId);
-    if (! $product) {
-        $this->error('Product not found for id '.$productId);
+    $httpStatus = match ($result['status'] ?? '') {
+        'success' => 200,
+        'insufficient_stock', 'payment_declined' => 409,
+        'product_not_found' => 404,
+        default => 500,
+    };
 
-        return;
-    }
+    $this->output->write(json_encode([
+        'http_status' => $httpStatus,
+        'duration_ms' => round((microtime(true) - $started) * 1000, 3),
+        'result' => $result,
+    ]));
+
+    return 0;
+})->purpose('Internal: one checkout for unsafe stress process pool');
+
+Artisan::command('stress:concurrent {--users=} {--product=1} {--quantity=} {--baseUrl=} {--scenario=safe} {--output=both}', function () {
+    $metrics = app(\App\Services\StressTesting\StressTestMetrics::class);
 
     try {
-        $scenarios = \App\Services\StressTesting\StressTestScenario::forKey($scenarioKey);
-    } catch (\InvalidArgumentException $exception) {
-        $this->error($exception->getMessage());
+        $users = (int) ($this->option('users') ?: config('stress_testing.default_users', 100));
+        $productId = max((int) $this->option('product'), 1);
+        $quantity = (int) ($this->option('quantity') ?: config('stress_testing.default_quantity', 1));
+        $baseUrl = rtrim((string) ($this->option('baseUrl') ?: config('stress_testing.default_base_url')), '/');
+        $scenarioKey = (string) $this->option('scenario');
+        $output = (string) $this->option('output');
 
-        return;
-    }
+        if ($users < 1) {
+            $this->error('--users must be at least 1');
 
-    $runner = app(\App\Services\StressTesting\ConcurrentStressRunner::class);
-    $checker = app(\App\Services\StressTesting\StressTestIntegrityChecker::class);
-    $reportBuilder = app(\App\Services\StressTesting\StressTestReportBuilder::class);
-    $timeout = (int) config('stress_testing.request_timeout_seconds', 30);
+            return 1;
+        }
 
-    $this->info('Task 9: concurrent stress test — '.$scenarioKey.' ('.$users.' simultaneous users)');
-    $this->line('Base URL: '.$baseUrl);
-    $this->line('Product #'.$productId.' stock='.$product->stock.' price_cents='.$product->price_cents);
-    $this->line('Ensure php artisan serve is running on '.$baseUrl);
-    $this->line('');
+        if (! in_array($output, ['console', 'md', 'json', 'both', 'none'], true)) {
+            $this->error('Invalid --output. Use console, md, json, both, or none.');
 
-    $reports = [];
+            return 1;
+        }
 
-    foreach ($scenarios as $scenario) {
-        $this->info('Scenario: '.$scenario->label.' → POST '.$scenario->path);
+        $orchestrator = app(\App\Services\StressTesting\StressTestOrchestrator::class);
 
-        $before = $checker->snapshot($productId);
+        try {
+            $product = $orchestrator->assertProductExists($productId);
+        } catch (\InvalidArgumentException $exception) {
+            $this->error($exception->getMessage());
 
-        $runMetrics = $runner->run(
-            baseUrl: $baseUrl,
-            path: $scenario->path,
-            productId: $productId,
-            quantity: $quantity,
-            users: $users,
-            timeoutSeconds: $timeout,
-        );
+            return 1;
+        }
 
-        $after = $checker->snapshot($productId);
+        try {
+            \App\Services\StressTesting\StressTestScenario::forKey($scenarioKey);
+        } catch (\InvalidArgumentException $exception) {
+            $this->error($exception->getMessage());
 
-        $integrity = $checker->evaluate(
-            before: $before,
-            after: $after,
-            successRequests: $runMetrics['success_requests'],
-            quantity: $quantity,
-            scenario: $scenario,
-        );
+            return 1;
+        }
 
-        $report = $reportBuilder->build(
-            scenario: $scenario,
-            productId: $productId,
-            quantity: $quantity,
-            users: $users,
-            baseUrl: $baseUrl,
-            runMetrics: $runMetrics,
-            integrity: $integrity,
-        );
+        $writeOutput = in_array($output, ['md', 'json', 'both'], true)
+            ? ($output === 'both' ? 'both' : $output)
+            : 'none';
 
-        $reports[] = $report;
-
-        $this->table(
-            ['Metric', 'Value'],
-            [
-                ['Total Requests', $report['total_requests']],
-                ['Success Requests', $report['success_requests']],
-                ['Failed Requests', $report['failed_requests']],
-                ['Rejected (409)', $report['rejected_requests']],
-                ['Average Response Time (ms)', $report['average_response_time_ms'] ?? 'n/a'],
-                ['System Crashed', $report['system_crashed'] ? 'Yes' : 'No'],
-                ['Data Integrity Pass', $report['data_integrity_pass'] ? 'Yes' : 'No'],
-            ]
-        );
-
-        $this->line($report['explanation']);
+        $this->info('Task 9: concurrent stress test — '.$scenarioKey.' ('.$users.' simultaneous users)');
+        $this->line('Base URL: '.$baseUrl);
+        $this->line('Product #'.$productId.' stock='.$product->stock.' price_cents='.$product->price_cents);
+        $this->line('Ensure php artisan serve is running on '.$baseUrl);
         $this->line('');
-    }
 
-    if (in_array($output, ['md', 'json', 'both'], true)) {
-        $reportBuilder->writeCombinedReport($reports, $output === 'both' ? 'both' : $output);
-        $this->info('Report written to:');
-        if (in_array($output, ['json', 'both'], true)) {
-            $this->line('  JSON: '.config('stress_testing.report_json_path'));
-        }
-        if (in_array($output, ['md', 'both'], true)) {
-            $this->line('  Markdown: '.config('stress_testing.report_markdown_path'));
-        }
-    }
+        $result = $orchestrator->runScenarios(
+            productId: $productId,
+            quantity: $quantity,
+            users: $users,
+            baseUrl: $baseUrl,
+            scenarioKey: $scenarioKey,
+            writeOutput: $writeOutput,
+        );
 
-    $this->line('Read back via GET /api/stress/last-report');
+        foreach ($result['reports'] as $report) {
+            $this->info('Scenario: '.$report['scenario_label'].' → POST '.$report['endpoint']);
+
+            $this->table(
+                ['Metric', 'Value'],
+                [
+                    ['Total Requests', $report['total_requests']],
+                    ['Success Requests', $report['success_requests']],
+                    ['Failed Requests', $report['failed_requests']],
+                    ['Rejected (409)', $report['rejected_requests']],
+                    ['Average Response Time (ms)', $report['average_response_time_ms'] ?? 'n/a'],
+                    ['System Crashed', $report['system_crashed'] ? 'Yes' : 'No'],
+                    ['Data Integrity Pass', $report['data_integrity_pass'] ? 'Yes' : 'No'],
+                ]
+            );
+
+            $this->line($report['explanation']);
+            $this->line('');
+        }
+
+        if (in_array($output, ['md', 'json', 'both'], true)) {
+            $this->info('Report written to:');
+            if (in_array($output, ['json', 'both'], true)) {
+                $this->line('  JSON: '.config('stress_testing.report_json_path'));
+            }
+            if (in_array($output, ['md', 'both'], true)) {
+                $this->line('  Markdown: '.config('stress_testing.report_markdown_path'));
+            }
+        }
+
+        $this->line('Read back via GET /api/stress/stats or GET /api/stress/last-report');
+
+        return 0;
+    } finally {
+        $metrics->clearDemoRunLock();
+    }
 })->purpose('Run 100+ concurrent checkout stress test and generate report');
 
 Artisan::command('benchmark:compare {--product=1} {--iterations=} {--baseUrl=} {--output=both}', function () {

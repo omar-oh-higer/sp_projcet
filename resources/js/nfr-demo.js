@@ -165,19 +165,41 @@ export function explainResponse(taskId, side, result, lang = 'en') {
         8: {
             before: {
                 en: body.integrity_violation
-                    ? 'Non-atomic: partial commit left orphan data (integrity violation).'
+                    ? `Non-atomic: partial commit at ${body.fail_at ?? '?'} left orphan data (integrity violation).`
                     : `Checkout status: ${body.status}. Separate commits — risk of orphans on failure.`,
                 ar: body.integrity_violation
-                    ? 'غير ذري: commit جزئي ترك بيانات يتيمة.'
+                    ? `غير ذري: commit جزئي عند ${body.fail_at ?? '?'} ترك بيانات يتيمة.`
                     : `حالة الدفع: ${body.status}. commits منفصلة — خطر يتامى عند الفشل.`,
             },
             after: {
                 en: body.status === 'success'
-                    ? 'ACID: all steps committed together.'
-                    : 'ACID: failure rolled back everything — no orphan records.',
+                    ? `ACID (${body.transaction_mode ?? 'acid'}): all steps committed together.`
+                    : body.rolled_back
+                        ? `ACID rollback at ${body.fail_at ?? '?'} — no orphan records (transaction_mode: ${body.transaction_mode ?? 'acid'}).`
+                        : 'ACID: failure rolled back everything — no orphan records.',
                 ar: body.status === 'success'
                     ? 'ACID: كل الخطوات معاً.'
-                    : 'ACID: الفشل تراجع عن كل شيء — لا سجلات يتيمة.',
+                    : body.rolled_back
+                        ? `ACID rollback — لا سجلات يتيمة (transaction_mode: ${body.transaction_mode ?? 'acid'}).`
+                        : 'ACID: الفشل تراجع عن كل شيء — لا سجلات يتيمة.',
+            },
+        },
+        9: {
+            before: {
+                en: body.data_integrity_pass === false
+                    ? `Unsafe stress: ${body.success_requests ?? '?'} OK — integrity FAIL (orphans/oversell possible under non-atomic load).`
+                    : `Unsafe concurrent load: ${body.success_requests ?? '?'} successes, avg ${body.average_response_time_ms ?? '?'} ms.`,
+                ar: body.data_integrity_pass === false
+                    ? `ضغط unsafe: ${body.success_requests ?? '?'} OK — سلامة فشلت (يتامى/oversell).`
+                    : `حمل concurrent unsafe: ${body.success_requests ?? '?'} نجاح.`,
+            },
+            after: {
+                en: body.data_integrity_pass
+                    ? `Safe ACID stress: ${body.success_requests ?? '?'} OK — integrity PASS, no oversell.`
+                    : `Safe ACID stress: integrity ${body.data_integrity_pass ? 'PASS' : 'FAIL'} — ${body.success_requests ?? '?'} successes.`,
+                ar: body.data_integrity_pass
+                    ? `ضغط ACID: ${body.success_requests ?? '?'} OK — سلامة ناجحة.`
+                    : `ضغط ACID: سلامة ${body.data_integrity_pass ? 'OK' : 'FAIL'}.`,
             },
         },
         10: {
@@ -278,6 +300,19 @@ export function nfrDemo(tasks) {
             loading: false,
             phase: '',
         },
+        integrityScenario: {
+            stats: null,
+            loading: false,
+            phase: '',
+        },
+        stressScenario: {
+            stats: null,
+            loading: false,
+            phase: '',
+            concurrentUsers: 100,
+            usersInitialized: false,
+            lastError: null,
+        },
 
         init() {
             const hash = window.location.hash.replace('#task-', '');
@@ -294,6 +329,9 @@ export function nfrDemo(tasks) {
                 const key = id === 'aop' ? 'aop' : (Number.isNaN(parseInt(id, 10)) ? id : parseInt(id, 10));
                 this.results[key] = { before: emptyResult(), after: emptyResult() };
             }
+            if (this.activeTask === 9) {
+                this.fetchStressStatus();
+            }
         },
 
         t(en, ar) {
@@ -308,6 +346,9 @@ export function nfrDemo(tasks) {
         selectTask(id) {
             this.activeTask = id;
             window.location.hash = `task-${id}`;
+            if (id === 9) {
+                this.fetchStressStatus();
+            }
         },
 
         vars() {
@@ -777,7 +818,212 @@ export function nfrDemo(tasks) {
         },
 
         async loadStressReport() {
-            await this.fetchStats('/api/stress/last-report', 'stress');
+            await this.fetchStressStatus();
+        },
+
+        stressUsersMax() {
+            return this.stressScenario.stats?.demo_users_max ?? 100;
+        },
+
+        clampStressUsers() {
+            const max = this.stressUsersMax();
+            const min = 1;
+            let n = Number(this.stressScenario.concurrentUsers);
+
+            if (!Number.isFinite(n)) {
+                n = this.stressScenario.stats?.demo_users ?? 100;
+            }
+
+            this.stressScenario.concurrentUsers = Math.min(max, Math.max(min, Math.round(n)));
+        },
+
+        setStressUsersPreset(n) {
+            this.stressScenario.concurrentUsers = Math.min(n, this.stressUsersMax());
+        },
+
+        stressHasRuns() {
+            return (this.stressScenario.stats?.scenario_summary?.run_count ?? 0) > 0;
+        },
+
+        stressRequestDelayMs() {
+            return this.stressScenario.stats?.demo_request_delay_ms ?? 600;
+        },
+
+        async stressSleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.stressRequestDelayMs());
+            });
+        },
+
+        async fetchStressStatus() {
+            const params = new URLSearchParams({ product_id: String(this.productId) });
+            const r = await callApi({ method: 'GET', path: `/api/stress/stats?${params.toString()}` });
+            if (r.ok && r.body) {
+                this.stressScenario.stats = r.body;
+                this.stats.stress = r.body;
+
+                if (!this.stressScenario.usersInitialized) {
+                    this.stressScenario.concurrentUsers = r.body.demo_users ?? 100;
+                    this.stressScenario.usersInitialized = true;
+                }
+
+                this.clampStressUsers();
+            }
+
+            return r;
+        },
+
+        async resetStressDemo(resetMetrics = true, clearReport = false) {
+            await callApi({
+                method: 'POST',
+                path: '/api/stress/demo-reset',
+                body: {
+                    product_id: this.productId,
+                    reset_metrics: resetMetrics,
+                    clear_report: clearReport,
+                },
+            });
+            this.stressScenario.phase = '';
+            await this.fetchStressStatus();
+        },
+
+        async runStressDemo(scenario, options = {}) {
+            const manageLoading = options.manageLoading !== false;
+            const runsBefore = this.stressScenario.stats?.scenario_summary?.run_count ?? 0;
+
+            if (manageLoading) {
+                this.stressScenario.loading = true;
+            }
+
+            this.stressScenario.lastError = null;
+            this.clampStressUsers();
+
+            try {
+                const r = await callApi({
+                    method: 'POST',
+                    path: '/api/stress/demo-run',
+                    body: {
+                        product_id: this.productId,
+                        quantity: this.quantity,
+                        scenario,
+                        users: this.stressScenario.concurrentUsers,
+                        base_url: window.location.origin,
+                        write_report: true,
+                    },
+                });
+
+                if (r.status === 202 || (r.ok && r.body?.status === 'running')) {
+                    const completed = await this.waitForStressDemoRun(runsBefore, scenario);
+                    if (!completed) {
+                        this.stressScenario.lastError = this.t(
+                            'Stress run timed out — check php artisan serve is running on this port.',
+                            'انتهت مهلة التشغيل — تأكد أن serve يعمل على هذا المنفذ.',
+                        );
+                    }
+                } else if (r.status === 409) {
+                    await this.waitForStressDemoRun(runsBefore, scenario);
+                } else if (!r.ok) {
+                    const body = r.body && typeof r.body === 'object' ? r.body : {};
+                    this.stressScenario.lastError = body.output || body.message || `HTTP ${r.status}`;
+                    await this.fetchStressStatus();
+                } else {
+                    await this.fetchStressStatus();
+                }
+            } finally {
+                if (manageLoading) {
+                    this.stressScenario.loading = false;
+                }
+            }
+        },
+
+        async waitForStressDemoRun(runsBefore, scenario) {
+            const maxWaitMs = 180000;
+            const intervalMs = 1500;
+            const startedAt = Date.now();
+            const expectedMinRuns = scenario === 'both' ? runsBefore + 2 : runsBefore + 1;
+
+            while (Date.now() - startedAt < maxWaitMs) {
+                this.stressScenario.phase = this.t(
+                    'Stress running in background…',
+                    'الضغط يعمل في الخلفية…',
+                );
+                await this.fetchStressStatus();
+
+                const stats = this.stressScenario.stats;
+                const runCount = stats?.scenario_summary?.run_count ?? 0;
+                const inProgress = stats?.demo_run_in_progress === true;
+
+                if (!inProgress && runCount >= expectedMinRuns) {
+                    this.stressScenario.phase = '';
+                    return true;
+                }
+
+                if (!inProgress && runCount < expectedMinRuns) {
+                    this.stressScenario.lastError = this.t(
+                        'Background stress run ended without results — refresh the page and try again. On Windows, demo-run must spawn a detached subprocess.',
+                        'انتهى تشغيل الضغط دون نتائج — حدّث الصفحة وحاول مجدداً.',
+                    );
+                    this.stressScenario.phase = '';
+                    return false;
+                }
+
+                await new Promise((resolve) => {
+                    setTimeout(resolve, intervalMs);
+                });
+            }
+
+            this.stressScenario.phase = '';
+            await this.fetchStressStatus();
+
+            return false;
+        },
+
+        async runStressFullScenario(taskId) {
+            this.stressScenario.loading = true;
+            this.setStressUsersPreset(100);
+
+            try {
+                this.stressScenario.phase = this.t(
+                    'Phase 0: demo reset (stock + orphans + metrics)',
+                    'المرحلة 0: إعادة تعيين',
+                );
+                await this.resetStressDemo(true, true);
+                await this.stressSleep();
+
+                this.stressScenario.phase = this.t(
+                    'Phase 1: unsafe concurrent load (non-atomic)',
+                    'المرحلة 1: unsafe concurrent',
+                );
+                await this.runStressDemo('unsafe', { manageLoading: false });
+                if (this.stressScenario.lastError) {
+                    return;
+                }
+                await this.stressSleep();
+
+                this.stressScenario.phase = this.t(
+                    'Phase 2: cleanup (keep run log)',
+                    'المرحلة 2: تنظيف (الإبقاء على السجل)',
+                );
+                await this.resetStressDemo(false, false);
+                await this.stressSleep();
+
+                this.stressScenario.phase = this.t(
+                    'Phase 3: safe concurrent load (ACID)',
+                    'المرحلة 3: safe ACID concurrent',
+                );
+                await this.runStressDemo('safe', { manageLoading: false });
+                if (this.stressScenario.lastError) {
+                    return;
+                }
+                await this.stressSleep();
+
+                this.stressScenario.phase = this.t('Phase 4: refresh summary', 'المرحلة 4: تحديث');
+                await this.fetchStressStatus();
+
+                this.stressScenario.phase = this.t('Done', 'اكتمل');
+            } finally {
+                this.stressScenario.loading = false;
+            }
         },
 
         async loadBenchmarkComparison() {
@@ -797,7 +1043,105 @@ export function nfrDemo(tasks) {
         },
 
         async loadIntegrityStats() {
-            await this.fetchStats('/api/checkout/integrity-stats', 'integrity');
+            await this.fetchIntegrityStatus();
+        },
+
+        integrityRequestDelayMs() {
+            return this.integrityScenario.stats?.demo_request_delay_ms ?? 400;
+        },
+
+        async integritySleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.integrityRequestDelayMs());
+            });
+        },
+
+        async fetchIntegrityStatus() {
+            const params = new URLSearchParams({ product_id: String(this.productId) });
+            const r = await callApi({ method: 'GET', path: `/api/checkout/integrity-stats?${params.toString()}` });
+            if (r.ok && r.body) {
+                this.integrityScenario.stats = r.body;
+                this.stats.integrity = r.body;
+            }
+
+            return r;
+        },
+
+        async resetIntegrityDemo(resetMetrics = true) {
+            await callApi({
+                method: 'POST',
+                path: '/api/checkout/demo-reset',
+                body: { product_id: this.productId, reset_metrics: resetMetrics },
+            });
+            this.integrityScenario.phase = '';
+            await this.fetchIntegrityStatus();
+        },
+
+        async runCheckout(mode) {
+            const path = mode === 'acid' ? '/api/checkout/acid' : '/api/checkout/non-atomic';
+            const headers = {};
+
+            if (this.simulateFailAt) {
+                headers['X-SIMULATE-FAIL-AT'] = this.simulateFailAt;
+            }
+            if (this.paymentDeclined) {
+                headers['X-SIMULATE-PAYMENT-DECLINED'] = '1';
+            }
+
+            await callApi({
+                method: 'POST',
+                path,
+                body: { product_id: this.productId, quantity: this.quantity },
+                headers,
+            });
+            await this.fetchIntegrityStatus();
+        },
+
+        async runIntegrityFullScenario(taskId) {
+            this.integrityScenario.loading = true;
+            const savedFailAt = this.simulateFailAt;
+            this.simulateFailAt = 'after_payment';
+            this.paymentDeclined = false;
+
+            try {
+                this.integrityScenario.phase = this.t(
+                    'Phase 0: demo reset (clean orphans + restore stock)',
+                    'المرحلة 0: إعادة تعيين',
+                );
+                await this.resetIntegrityDemo(true);
+                await this.integritySleep();
+
+                this.integrityScenario.phase = this.t(
+                    'Phase 1: non-atomic + fail after payment → orphan',
+                    'المرحلة 1: غير ذري → يتيم',
+                );
+                await this.runCheckout('non-atomic');
+                await this.integritySleep();
+
+                this.integrityScenario.phase = this.t(
+                    'Phase 2: cleanup orphans (keep log)',
+                    'المرحلة 2: تنظيف (الإبقاء على السجل)',
+                );
+                await this.resetIntegrityDemo(false);
+                await this.integritySleep();
+
+                this.integrityScenario.phase = this.t(
+                    'Phase 3: ACID + same fail → rollback',
+                    'المرحلة 3: ACID → rollback',
+                );
+                await this.runCheckout('acid');
+                await this.integritySleep();
+
+                this.integrityScenario.phase = this.t('Phase 4: refresh summary', 'المرحلة 4: تحديث');
+                await this.fetchIntegrityStatus();
+
+                this.integrityScenario.phase = this.t('Done', 'اكتمل');
+                await this.runSide(taskId, 'before');
+                await this.runSide(taskId, 'after');
+            } finally {
+                this.simulateFailAt = savedFailAt;
+                this.integrityScenario.loading = false;
+            }
         },
 
         async loadConcurrencyStats() {

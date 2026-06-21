@@ -30,8 +30,8 @@
         </button>
     </div>
 
-{{-- Task 9: read-only stress report --}}
-@elseif(!empty($task['read_only']))
+{{-- Task 9: read-only stress report — replaced by stress_scenario partial below --}}
+@elseif(!empty($task['read_only']) && empty($task['stress_scenario']))
     <div class="space-y-4">
         <div class="rounded-lg bg-slate-100 p-4 font-mono text-sm">
             php artisan stress:concurrent --users=50 --scenario=safe
@@ -120,10 +120,12 @@
 
 @else
     {{-- Standard before/after compare --}}
+    @if(!empty($task['before']))
     <div class="grid md:grid-cols-2 gap-4">
         @include('demo.partials.result-card', ['side' => 'before', 'taskId' => $taskId])
         @include('demo.partials.result-card', ['side' => 'after', 'taskId' => $taskId])
     </div>
+    @endif
 
     {{-- Task 1: parallel demo --}}
     @if(!empty($task['parallel_demo']))
@@ -188,28 +190,14 @@
         @include('demo.partials.concurrency-scenario', ['taskId' => $taskId])
     @endif
 
-    {{-- Task 8: simulate headers --}}
-    @if(!empty($task['simulate_headers']))
-        <div class="mt-4 flex flex-wrap items-center gap-4 p-4 rounded-lg border bg-slate-50 text-sm">
-            <label class="flex items-center gap-2">
-                <span x-text="t('Simulate fail at', 'محاكاة فشل')"></span>
-                <select x-model="simulateFailAt" class="rounded border-slate-300">
-                    <option value="after_payment">after_payment</option>
-                    <option value="after_stock">after_stock</option>
-                </select>
-            </label>
-            <label class="flex items-center gap-2">
-                <input type="checkbox" x-model="paymentDeclined">
-                <span x-text="t('Payment declined', 'رفض الدفع')"></span>
-            </label>
-            <button type="button" @click="loadIntegrityStats()"
-                class="rounded-lg border px-3 py-1.5 hover:bg-white"
-                x-text="t('Integrity stats', 'إحصائيات السلامة')">
-            </button>
-        </div>
-        <template x-if="stats.integrity?.metrics">
-            <pre class="mt-2 text-xs p-3 bg-slate-100 rounded overflow-x-auto" x-text="JSON.stringify(stats.integrity.metrics, null, 2)"></pre>
-        </template>
+    {{-- Task 8: transaction integrity scenario --}}
+    @if(!empty($task['integrity_scenario']))
+        @include('demo.partials.integrity-scenario', ['taskId' => $taskId])
+    @endif
+
+    {{-- Task 9: stress testing scenario --}}
+    @if(!empty($task['stress_scenario']))
+        @include('demo.partials.stress-scenario', ['taskId' => $taskId])
     @endif
 
     {{-- Task 10: benchmark --}}
