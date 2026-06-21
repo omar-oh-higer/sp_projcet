@@ -61,10 +61,73 @@ class PerformanceMonitoringTest extends TestCase
                 'recent',
             ]);
 
-        $this->assertSame(2, PerformanceMeasurement::query()->count());
+        $this->assertSame(1, PerformanceMeasurement::query()->count());
     }
 
-    public function test_performance_reset_clears_prior_measurements(): void
+    public function test_performance_routes_excluded_from_self_recording(): void
+    {
+        Product::query()->create([
+            'name' => 'Exclude Product',
+            'stock' => 2,
+        ]);
+
+        $this->postJson('/api/buy-without-lock', [
+            'product_id' => 1,
+            'quantity' => 1,
+        ])->assertOk();
+
+        $this->assertSame(1, PerformanceMeasurement::query()->count());
+
+        $stats = $this->getJson('/api/performance/stats');
+        $stats->assertOk();
+        $stats->assertHeader('X-Response-Time-Ms');
+
+        $this->assertSame(1, PerformanceMeasurement::query()->count());
+        $this->assertDatabaseMissing('performance_measurements', [
+            'name' => 'api/performance/stats',
+        ]);
+
+        $reset = $this->postJson('/api/performance/reset');
+        $reset->assertOk();
+        $reset->assertHeader('X-Response-Time-Ms');
+
+        $this->assertDatabaseMissing('performance_measurements', [
+            'name' => 'api/performance/reset',
+        ]);
+    }
+
+    public function test_stats_includes_enriched_fields(): void
+    {
+        Product::query()->create([
+            'name' => 'Enriched Product',
+            'stock' => 5,
+        ]);
+
+        $this->postJson('/api/buy-without-lock', [
+            'product_id' => 1,
+            'quantity' => 1,
+        ])->assertOk();
+
+        $response = $this->getJson('/api/performance/stats');
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'has_measurements',
+                'top_routes',
+                'slowest_recent',
+                'aspect_message_en',
+                'aspect_message_ar',
+                'demo_probe_endpoints',
+                'refreshed_at',
+            ])
+            ->assertJsonPath('has_measurements', true);
+
+        $this->assertNotEmpty($response->json('aspect_message_en'));
+        $this->assertNotEmpty($response->json('aspect_message_ar'));
+        $this->assertNotEmpty($response->json('top_routes'));
+    }
+
+    public function test_demo_reset_clears_all_measurements(): void
     {
         Product::query()->create([
             'name' => 'Reset Product',
@@ -81,16 +144,30 @@ class PerformanceMonitoringTest extends TestCase
             'name' => 'api/buy-without-lock',
         ]);
 
-        $this->postJson('/api/performance/reset')->assertOk();
+        $this->postJson('/api/performance/demo-reset')->assertOk();
 
         $this->assertDatabaseMissing('performance_measurements', [
             'name' => 'api/buy-without-lock',
         ]);
 
-        $this->assertDatabaseHas('performance_measurements', [
-            'channel' => 'http',
-            'name' => 'api/performance/reset',
+        $this->assertSame(0, PerformanceMeasurement::query()->count());
+    }
+
+    public function test_performance_reset_clears_prior_measurements(): void
+    {
+        Product::query()->create([
+            'name' => 'Reset Product Legacy',
+            'stock' => 2,
         ]);
+
+        $this->postJson('/api/buy-without-lock', [
+            'product_id' => 1,
+            'quantity' => 1,
+        ])->assertOk();
+
+        $this->postJson('/api/performance/reset')->assertOk();
+
+        $this->assertSame(0, PerformanceMeasurement::query()->count());
     }
 
     public function test_job_middleware_records_job_channel_measurement(): void

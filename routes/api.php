@@ -65,6 +65,7 @@ Route::middleware('throttle:purchases')->group(function () {
 
     Route::get('/performance/stats', [PerformanceMonitoringController::class, 'stats']);
     Route::post('/performance/reset', [PerformanceMonitoringController::class, 'reset']);
+    Route::post('/performance/demo-reset', [PerformanceMonitoringController::class, 'demoReset']);
 
     Route::get('/products/{product}/direct', [ProductCatalogController::class, 'showDirect']);
     Route::get('/products/{product}/cached', [ProductCatalogController::class, 'showCached']);

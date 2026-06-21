@@ -321,6 +321,12 @@ export function nfrDemo(tasks) {
             iterationsInitialized: false,
             lastError: null,
         },
+        performanceScenario: {
+            stats: null,
+            loading: false,
+            phase: '',
+            lastError: null,
+        },
 
         init() {
             const hash = window.location.hash.replace('#task-', '');
@@ -343,6 +349,9 @@ export function nfrDemo(tasks) {
             if (this.activeTask === 10) {
                 this.fetchBenchmarkStatus();
             }
+            if (this.activeTask === 'aop') {
+                this.fetchPerformanceStatus();
+            }
         },
 
         t(en, ar) {
@@ -362,6 +371,9 @@ export function nfrDemo(tasks) {
             }
             if (id === 10) {
                 this.fetchBenchmarkStatus();
+            }
+            if (id === 'aop') {
+                this.fetchPerformanceStatus();
             }
         },
 
@@ -1188,12 +1200,141 @@ export function nfrDemo(tasks) {
         },
 
         async loadPerformanceStats() {
-            await this.fetchStats('/api/performance/stats', 'performance');
+            await this.fetchPerformanceStatus();
+        },
+
+        performanceRequestDelayMs() {
+            return this.performanceScenario.stats?.demo_request_delay_ms ?? 200;
+        },
+
+        async performanceSleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.performanceRequestDelayMs());
+            });
+        },
+
+        performanceHasMeasurements() {
+            return this.performanceScenario.stats?.has_measurements === true
+                || (this.performanceScenario.stats?.summary?.total_measurements ?? 0) > 0;
+        },
+
+        performanceIsSlow(durationMs) {
+            const threshold = this.performanceScenario.stats?.slow_threshold_ms ?? 500;
+
+            return Number(durationMs) >= threshold;
+        },
+
+        async fetchPerformanceStatus() {
+            const r = await callApi({ method: 'GET', path: '/api/performance/stats' });
+            if (r.ok && r.body) {
+                this.performanceScenario.stats = r.body;
+                this.stats.performance = r.body;
+            }
+
+            return r;
+        },
+
+        async resetPerformanceDemo() {
+            await callApi({ method: 'POST', path: '/api/performance/demo-reset' });
+            this.performanceScenario.phase = '';
+            await this.fetchPerformanceStatus();
         },
 
         async resetPerformance() {
-            await callApi({ method: 'POST', path: '/api/performance/reset' });
-            this.stats.performance = null;
+            await this.resetPerformanceDemo();
+        },
+
+        async runPerformanceProbe(method, path, body = null) {
+            this.performanceScenario.loading = true;
+            this.performanceScenario.lastError = null;
+
+            try {
+                const r = await callApi({ method, path, body });
+                const headerMs = r.responseTimeMs != null ? Math.round(r.responseTimeMs) : Math.round(r.elapsed);
+
+                this.performanceScenario.phase = this.t(
+                    `${method} ${path} → X-Response-Time-Ms: ${headerMs}`,
+                    `${method} ${path} → X-Response-Time-Ms: ${headerMs}`,
+                );
+
+                if (!r.ok) {
+                    this.performanceScenario.lastError = r.body?.message || `HTTP ${r.status}`;
+                }
+
+                await this.fetchPerformanceStatus();
+            } finally {
+                this.performanceScenario.loading = false;
+            }
+        },
+
+        async runPerformanceFullScenario(taskId) {
+            this.performanceScenario.loading = true;
+            this.performanceScenario.lastError = null;
+
+            const probes = [
+                {
+                    label: this.t('Buy with lock', 'شراء مع lock'),
+                    method: 'POST',
+                    path: '/api/buy-with-lock',
+                    body: { product_id: this.productId, quantity: 1 },
+                },
+                {
+                    label: this.t('Cached product', 'منتج cached'),
+                    method: 'GET',
+                    path: `/api/products/${this.productId}/cached`,
+                },
+                {
+                    label: this.t('Slow sales report', 'تقرير بطيء'),
+                    method: 'GET',
+                    path: `/api/benchmark/sales-report/slow?product_id=${this.productId}`,
+                },
+                {
+                    label: this.t('ACID checkout', 'checkout ACID'),
+                    method: 'POST',
+                    path: '/api/checkout/acid',
+                    body: { product_id: this.productId, quantity: 1 },
+                },
+            ];
+
+            try {
+                this.performanceScenario.phase = this.t('Phase 0: reset measurements', 'المرحلة 0: reset');
+                await this.resetPerformanceDemo();
+                await this.performanceSleep();
+
+                for (let i = 0; i < probes.length; i++) {
+                    const probe = probes[i];
+                    this.performanceScenario.phase = this.t(
+                        `Phase 1 (${i + 1}/${probes.length}): ${probe.label}`,
+                        `المرحلة 1 (${i + 1}/${probes.length}): ${probe.label}`,
+                    );
+
+                    const r = await callApi({
+                        method: probe.method,
+                        path: probe.path,
+                        body: probe.body ?? null,
+                    });
+
+                    const headerMs = r.responseTimeMs != null ? Math.round(r.responseTimeMs) : Math.round(r.elapsed);
+
+                    this.performanceScenario.phase = this.t(
+                        `Phase 1 (${i + 1}/${probes.length}): ${probe.label} — X-Response-Time-Ms: ${headerMs}`,
+                        `المرحلة 1 (${i + 1}/${probes.length}): ${probe.label} — X-Response-Time-Ms: ${headerMs}`,
+                    );
+
+                    if (!r.ok) {
+                        this.performanceScenario.lastError = r.body?.message || `HTTP ${r.status} on ${probe.path}`;
+                    }
+
+                    await this.performanceSleep();
+                }
+
+                this.performanceScenario.phase = this.t('Phase 2: refresh stats', 'المرحلة 2: تحديث');
+                await this.fetchPerformanceStatus();
+
+                this.performanceScenario.phase = this.t('Done', 'اكتمل');
+            } finally {
+                this.performanceScenario.loading = false;
+            }
         },
 
         async loadIntegrityStats() {

@@ -67,57 +67,6 @@
         </template>
     </div>
 
-{{-- AOP --}}
-@elseif(!empty($task['performance_stats']))
-    <div class="space-y-4">
-        <button type="button" @click="loadPerformanceStats()"
-            class="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-700"
-            x-text="t('Load performance stats', 'تحميل إحصائيات الأداء')">
-        </button>
-        <button type="button" @click="resetPerformance()"
-            class="rounded-lg border border-slate-300 px-4 py-2 text-sm hover:bg-slate-100"
-            x-text="t('Reset', 'إعادة تعيين')">
-        </button>
-        <template x-if="stats.performance">
-            <div class="space-y-3">
-                <div class="grid grid-cols-3 gap-3 text-sm">
-                    <div class="rounded-lg border bg-white p-3">
-                        <div class="text-slate-500" x-text="t('Measurements', 'قياسات')"></div>
-                        <div class="text-xl font-bold" x-text="stats.performance.summary?.total_measurements ?? 0"></div>
-                    </div>
-                    <div class="rounded-lg border bg-white p-3">
-                        <div class="text-slate-500" x-text="t('Avg ms', 'متوسط ms')"></div>
-                        <div class="text-xl font-bold" x-text="stats.performance.summary?.avg_duration_ms ?? 0"></div>
-                    </div>
-                    <div class="rounded-lg border bg-white p-3">
-                        <div class="text-slate-500" x-text="t('Slow', 'بطيء')"></div>
-                        <div class="text-xl font-bold text-amber-600" x-text="stats.performance.summary?.slow_count ?? 0"></div>
-                    </div>
-                </div>
-                <div class="overflow-x-auto rounded-lg border">
-                    <table class="w-full text-sm">
-                        <thead class="bg-slate-100">
-                            <tr>
-                                <th class="px-3 py-2 text-left" x-text="t('Route', 'مسار')"></th>
-                                <th class="px-3 py-2 text-left" x-text="t('ms', 'ms')"></th>
-                                <th class="px-3 py-2 text-left" x-text="t('Status', 'حالة')"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="row in (stats.performance.recent || []).slice(0, 15)" :key="row.name + row.recorded_at">
-                                <tr class="border-t">
-                                    <td class="px-3 py-1.5 font-mono text-xs" x-text="row.name"></td>
-                                    <td class="px-3 py-1.5" x-text="row.duration_ms"></td>
-                                    <td class="px-3 py-1.5" x-text="row.status_code"></td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </template>
-    </div>
-
 @else
     {{-- Standard before/after compare --}}
     @if(!empty($task['before']))
@@ -203,5 +152,10 @@
     {{-- Task 10: benchmarking scenario --}}
     @if(!empty($task['benchmark_scenario']))
         @include('demo.partials.benchmark-scenario', ['taskId' => $taskId])
+    @endif
+
+    {{-- AOP: performance monitoring scenario --}}
+    @if(!empty($task['performance_scenario']))
+        @include('demo.partials.performance-scenario', ['taskId' => $taskId])
     @endif
 @endif

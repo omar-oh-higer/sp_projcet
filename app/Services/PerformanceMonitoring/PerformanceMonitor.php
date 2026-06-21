@@ -22,13 +22,43 @@ class PerformanceMonitor
             return;
         }
 
+        $path = $request->path();
+
+        if ($this->shouldExcludeHttpPath($path)) {
+            return;
+        }
+
         $metadata = [
             'method' => $request->method(),
             'route' => $request->route()?->getName(),
         ];
 
-        $this->persist('http', $request->path(), $durationMs, $response->getStatusCode(), $metadata);
-        $this->logIfSlow('http', $request->path(), $durationMs);
+        $this->persist('http', $path, $durationMs, $response->getStatusCode(), $metadata);
+        $this->logIfSlow('http', $path, $durationMs);
+    }
+
+    public function shouldExcludeHttpPath(string $path): bool
+    {
+        $normalized = ltrim($path, '/');
+        $prefixes = config('performance_monitoring.excluded_path_prefixes', ['api/performance']);
+
+        if (! is_array($prefixes)) {
+            return false;
+        }
+
+        foreach ($prefixes as $prefix) {
+            $prefix = ltrim((string) $prefix, '/');
+
+            if ($prefix === '') {
+                continue;
+            }
+
+            if ($normalized === $prefix || str_starts_with($normalized, $prefix.'/')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function recordJob(string $jobClass, float $durationMs, ?Throwable $exception = null): void
