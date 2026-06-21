@@ -102,6 +102,98 @@ class BenchmarkBottleneckTest extends TestCase
             ->assertJsonPath('comparison.before.avg_response_time_ms', 100);
     }
 
+    public function test_benchmark_stats_includes_enriched_demo_fields(): void
+    {
+        $response = $this->getJson('/api/benchmark/stats?product_id=1');
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'metrics',
+                'comparison',
+                'recent_runs',
+                'db_traces',
+                'order_count',
+                'ready_for_demo',
+                'demo_iterations',
+                'demo_iterations_max',
+                'sample_order_limit',
+                'product_snapshot',
+                'has_comparison',
+                'refreshed_at',
+            ])
+            ->assertJsonPath('demo_iterations', (int) config('benchmarking.demo_iterations', 5))
+            ->assertJsonPath('demo_iterations_max', (int) config('benchmarking.demo_iterations_max', 10));
+    }
+
+    public function test_demo_run_builds_comparison_with_five_iterations(): void
+    {
+        $response = $this->postJson('/api/benchmark/demo-run', [
+            'product_id' => 1,
+            'iterations' => 5,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('iterations', 5)
+            ->assertJsonStructure([
+                'comparison' => [
+                    'before' => ['avg_response_time_ms', 'avg_db_queries'],
+                    'after' => ['avg_response_time_ms', 'avg_db_queries'],
+                    'improvement' => ['response_time_percent_faster', 'db_queries_percent_fewer'],
+                ],
+            ]);
+
+        $comparison = $response->json('comparison');
+        $this->assertGreaterThan(
+            $comparison['after']['avg_db_queries'],
+            $comparison['before']['avg_db_queries'],
+        );
+        $this->assertGreaterThan(
+            $comparison['after']['avg_response_time_ms'],
+            $comparison['before']['avg_response_time_ms'],
+        );
+        $this->assertGreaterThan(0, $comparison['improvement']['response_time_percent_faster']);
+
+        $this->getJson('/api/benchmark/stats?product_id=1')
+            ->assertOk()
+            ->assertJsonPath('has_comparison', true);
+    }
+
+    public function test_demo_reset_clears_metrics_and_runs(): void
+    {
+        $this->postJson('/api/benchmark/demo-run', [
+            'product_id' => 1,
+            'iterations' => 2,
+        ])->assertOk();
+
+        $this->assertDatabaseCount('benchmark_runs', 4);
+
+        $this->postJson('/api/benchmark/demo-reset', [
+            'product_id' => 1,
+            'ensure_seed' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('metrics_reset', true);
+
+        $this->assertDatabaseCount('benchmark_runs', 0);
+
+        $this->getJson('/api/benchmark/stats?product_id=1')
+            ->assertOk()
+            ->assertJsonPath('has_comparison', false)
+            ->assertJsonPath('metrics.runs_completed', 0);
+    }
+
+    public function test_stats_shows_seed_hint_when_few_orders(): void
+    {
+        Order::query()->delete();
+
+        $response = $this->getJson('/api/benchmark/stats?product_id=1');
+
+        $response->assertOk()
+            ->assertJsonPath('ready_for_demo', false)
+            ->assertJsonPath('order_count', 0)
+            ->assertJsonPath('seed_hint_en', fn ($value) => is_string($value) && str_contains($value, 'BenchmarkOrdersSeeder'));
+    }
+
     public function test_traces_endpoint_lists_persisted_runs(): void
     {
         $this->getJson('/api/benchmark/sales-report/slow?product_id=1')->assertOk();

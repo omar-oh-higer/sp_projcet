@@ -204,7 +204,7 @@ return [
             'problem_ar' => 'استعلامات N+1 تجعل التقارير بطيئة — تحتاج قياساً قبل التحسين.',
             'solution_en' => 'Eager loading reduces queries and response time — compare slow vs optimized.',
             'solution_ar' => 'التحميل المسبق يقلل الاستعلامات وزمن الاستجابة — قارن البطيء بالمحسّن.',
-            'prerequisites' => [],
+            'prerequisites' => ['serve' => true, 'seed_demo' => 'BenchmarkOrdersSeeder'],
             'before' => [
                 'method' => 'GET',
                 'path' => '/api/benchmark/sales-report/slow?product_id={productId}',
@@ -214,7 +214,7 @@ return [
                 'path' => '/api/benchmark/sales-report/optimized?product_id={productId}',
             ],
             'highlights' => ['total_duration_ms', 'db_queries', 'bottleneck_span', 'trace_id'],
-            'benchmark_comparison' => true,
+            'benchmark_scenario' => true,
         ],
 
         'aop' => [

@@ -200,42 +200,8 @@
         @include('demo.partials.stress-scenario', ['taskId' => $taskId])
     @endif
 
-    {{-- Task 10: benchmark --}}
-    @if(!empty($task['benchmark_comparison']))
-        <div class="mt-4">
-            <button type="button" @click="loadBenchmarkComparison()"
-                class="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm hover:bg-indigo-700"
-                x-text="t('Run slow + optimized + comparison', 'بطيء + محسّن + مقارنة')">
-            </button>
-            <template x-if="stats.benchmark?.comparison">
-                <div class="mt-3 p-4 rounded-lg border bg-white text-sm">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <div class="text-slate-500" x-text="t('Before avg ms', 'قبل')"></div>
-                            <div class="text-xl font-bold text-red-600" x-text="stats.benchmark.comparison.before?.avg_response_time_ms ?? '—'"></div>
-                        </div>
-                        <div>
-                            <div class="text-slate-500" x-text="t('After avg ms', 'بعد')"></div>
-                            <div class="text-xl font-bold text-emerald-600" x-text="stats.benchmark.comparison.after?.avg_response_time_ms ?? '—'"></div>
-                        </div>
-                    </div>
-                    <p class="mt-2 text-indigo-700" x-show="stats.benchmark.comparison.improvement"
-                        x-text="(stats.benchmark.comparison.improvement?.response_time_percent_faster ?? 0) + '% ' + t('faster', 'أسرع')">
-                    </p>
-                </div>
-            </template>
-            <template x-if="results[@json($taskId)].before.status && results[@json($taskId)].after.status">
-                <div class="mt-3 grid grid-cols-2 gap-4 text-sm">
-                    <div class="p-3 rounded border">
-                        <div x-text="t('DB queries (slow)', 'استعلامات بطيء')"></div>
-                        <div class="text-2xl font-bold" x-text="results[@json($taskId)].before.body?.db_queries ?? '—'"></div>
-                    </div>
-                    <div class="p-3 rounded border">
-                        <div x-text="t('DB queries (optimized)', 'استعلامات محسّن')"></div>
-                        <div class="text-2xl font-bold text-emerald-600" x-text="results[@json($taskId)].after.body?.db_queries ?? '—'"></div>
-                    </div>
-                </div>
-            </template>
-        </div>
+    {{-- Task 10: benchmarking scenario --}}
+    @if(!empty($task['benchmark_scenario']))
+        @include('demo.partials.benchmark-scenario', ['taskId' => $taskId])
     @endif
 @endif

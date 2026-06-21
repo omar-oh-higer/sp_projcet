@@ -39,11 +39,14 @@ Route::middleware('throttle:purchases')->group(function () {
     Route::post('/stress/demo-reset', [StressTestController::class, 'demoReset']);
     Route::post('/stress/demo-run', [StressTestController::class, 'demoRun']);
 
+    Route::get('/benchmark/stats', [BenchmarkController::class, 'stats']);
     Route::get('/benchmark/sales-report/slow', [BenchmarkController::class, 'salesReportSlow']);
     Route::get('/benchmark/sales-report/optimized', [BenchmarkController::class, 'salesReportOptimized']);
     Route::get('/benchmark/comparison', [BenchmarkController::class, 'comparison']);
     Route::get('/benchmark/traces', [BenchmarkController::class, 'traces']);
     Route::post('/benchmark/reset', [BenchmarkController::class, 'reset']);
+    Route::post('/benchmark/demo-reset', [BenchmarkController::class, 'demoReset']);
+    Route::post('/benchmark/demo-run', [BenchmarkController::class, 'demoRun']);
 
     Route::post('/tally-daily-sales-wait', [DailySalesTallyController::class, 'tallyWait']);
     Route::post('/tally-daily-sales-queued', [DailySalesTallyController::class, 'tallyQueued']);

@@ -313,6 +313,14 @@ export function nfrDemo(tasks) {
             usersInitialized: false,
             lastError: null,
         },
+        benchmarkScenario: {
+            stats: null,
+            loading: false,
+            phase: '',
+            iterations: 5,
+            iterationsInitialized: false,
+            lastError: null,
+        },
 
         init() {
             const hash = window.location.hash.replace('#task-', '');
@@ -332,6 +340,9 @@ export function nfrDemo(tasks) {
             if (this.activeTask === 9) {
                 this.fetchStressStatus();
             }
+            if (this.activeTask === 10) {
+                this.fetchBenchmarkStatus();
+            }
         },
 
         t(en, ar) {
@@ -348,6 +359,9 @@ export function nfrDemo(tasks) {
             window.location.hash = `task-${id}`;
             if (id === 9) {
                 this.fetchStressStatus();
+            }
+            if (id === 10) {
+                this.fetchBenchmarkStatus();
             }
         },
 
@@ -1027,10 +1041,150 @@ export function nfrDemo(tasks) {
         },
 
         async loadBenchmarkComparison() {
-            await this.runSide(10, 'before');
-            await this.runSide(10, 'after');
-            await this.fetchStats('/api/benchmark/comparison', 'benchmark');
-            await this.fetchStats('/api/benchmark/traces', 'traces');
+            await this.fetchBenchmarkStatus();
+        },
+
+        benchmarkIterationsMax() {
+            return this.benchmarkScenario.stats?.demo_iterations_max ?? 10;
+        },
+
+        clampBenchmarkIterations() {
+            const max = this.benchmarkIterationsMax();
+            const min = 1;
+            let n = Number(this.benchmarkScenario.iterations);
+
+            if (!Number.isFinite(n)) {
+                n = this.benchmarkScenario.stats?.demo_iterations ?? 5;
+            }
+
+            this.benchmarkScenario.iterations = Math.min(max, Math.max(min, Math.round(n)));
+        },
+
+        setBenchmarkIterations(n) {
+            this.benchmarkScenario.iterations = Math.min(n, this.benchmarkIterationsMax());
+        },
+
+        benchmarkHasComparison() {
+            return this.benchmarkScenario.stats?.has_comparison === true
+                || this.benchmarkScenario.stats?.comparison != null;
+        },
+
+        benchmarkRequestDelayMs() {
+            return this.benchmarkScenario.stats?.demo_request_delay_ms ?? 300;
+        },
+
+        async benchmarkSleep() {
+            await new Promise((resolve) => {
+                setTimeout(resolve, this.benchmarkRequestDelayMs());
+            });
+        },
+
+        async fetchBenchmarkStatus() {
+            const params = new URLSearchParams({ product_id: String(this.productId) });
+            const r = await callApi({ method: 'GET', path: `/api/benchmark/stats?${params.toString()}` });
+            if (r.ok && r.body) {
+                this.benchmarkScenario.stats = r.body;
+                this.stats.benchmark = r.body;
+
+                if (!this.benchmarkScenario.iterationsInitialized) {
+                    this.benchmarkScenario.iterations = r.body.demo_iterations ?? 5;
+                    this.benchmarkScenario.iterationsInitialized = true;
+                }
+
+                this.clampBenchmarkIterations();
+            }
+
+            return r;
+        },
+
+        async resetBenchmarkDemo(ensureSeed = true, clearReport = false) {
+            await callApi({
+                method: 'POST',
+                path: '/api/benchmark/demo-reset',
+                body: {
+                    product_id: this.productId,
+                    ensure_seed: ensureSeed,
+                    clear_report: clearReport,
+                },
+            });
+            this.benchmarkScenario.phase = '';
+            await this.fetchBenchmarkStatus();
+        },
+
+        async runBenchmarkOnce(mode) {
+            this.benchmarkScenario.loading = true;
+            this.benchmarkScenario.lastError = null;
+
+            try {
+                const path = mode === 'optimized'
+                    ? `/api/benchmark/sales-report/optimized?product_id=${this.productId}`
+                    : `/api/benchmark/sales-report/slow?product_id=${this.productId}`;
+                const r = await callApi({ method: 'GET', path });
+
+                if (!r.ok) {
+                    this.benchmarkScenario.lastError = r.body?.message || `HTTP ${r.status}`;
+                }
+
+                await this.fetchBenchmarkStatus();
+            } finally {
+                this.benchmarkScenario.loading = false;
+            }
+        },
+
+        async runBenchmarkDemoRun() {
+            this.clampBenchmarkIterations();
+
+            const r = await callApi({
+                method: 'POST',
+                path: '/api/benchmark/demo-run',
+                body: {
+                    product_id: this.productId,
+                    iterations: this.benchmarkScenario.iterations,
+                    write_report: true,
+                },
+            });
+
+            if (!r.ok) {
+                const body = r.body && typeof r.body === 'object' ? r.body : {};
+                this.benchmarkScenario.lastError = body.message || `HTTP ${r.status}`;
+            }
+
+            await this.fetchBenchmarkStatus();
+
+            return r.ok;
+        },
+
+        async runBenchmarkFullScenario(taskId) {
+            this.benchmarkScenario.loading = true;
+            this.setBenchmarkIterations(5);
+
+            try {
+                this.benchmarkScenario.phase = this.t(
+                    'Phase 0: reset + ensure demo orders',
+                    'المرحلة 0: reset + بيانات العرض',
+                );
+                await this.resetBenchmarkDemo(true, true);
+                await this.benchmarkSleep();
+
+                this.benchmarkScenario.phase = this.t(
+                    `Phase 1: ${this.benchmarkScenario.iterations}× slow + ${this.benchmarkScenario.iterations}× optimized`,
+                    `المرحلة 1: ${this.benchmarkScenario.iterations}× بطيء + ${this.benchmarkScenario.iterations}× محسّن`,
+                );
+                const ok = await this.runBenchmarkDemoRun();
+                if (!ok) {
+                    return;
+                }
+                await this.benchmarkSleep();
+
+                this.benchmarkScenario.phase = this.t('Phase 2: refresh summary', 'المرحلة 2: تحديث');
+                await this.fetchBenchmarkStatus();
+                await this.runSide(taskId, 'before');
+                await this.runSide(taskId, 'after');
+
+                this.benchmarkScenario.phase = this.t('Done', 'اكتمل');
+            } finally {
+                this.benchmarkScenario.loading = false;
+            }
         },
 
         async loadPerformanceStats() {
